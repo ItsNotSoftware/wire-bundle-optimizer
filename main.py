@@ -1,50 +1,147 @@
-from optimizer import WireBundleOptimizer
-import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib.pyplot as plt
+import dearpygui.dearpygui as dpg
+from optimizer import WireBundleOptimizer
+from typing import List, Tuple, Any
 
 
-def plot_wire_bundle(
-    positions: np.ndarray, radii: np.ndarray, outer_radius: float
-) -> None:
+class WireBundleApp:
     """
-    Plot the optimized wire bundle layout.
-
-    Parameters:
-        positions (np.ndarray): Array of wire center coordinates of shape (n, 2).
-        radii (np.ndarray): Array of wire radii of shape (n,).
-        outer_radius (float): Radius of the enclosing circle.
+    DearPyGui application for defining wire bundles and optimizing their layout.
     """
-    fig, ax = plt.subplots(figsize=(6, 6))
-    ax.set_aspect("equal")
-    ax.set_title("Optimized Wire Bundle")
 
-    # Draw outer circle
-    outer = plt.Circle((0, 0), outer_radius, color="gray", fill=False, linestyle="--")
-    ax.add_patch(outer)
+    def __init__(self) -> None:
+        self.wire_defs: List[Tuple[int, float]] = []
+        self.scale_factor: float = 1.0
+        self._setup_gui()
 
-    # Draw each wire
-    for (x, y), r in zip(positions, radii):
-        c = plt.Circle((x, y), r, color="steelblue", alpha=0.6)
-        ax.add_patch(c)
+    def _setup_gui(self) -> None:
+        dpg.create_context()
+        dpg.set_global_font_scale(self.scale_factor)
+        dpg.create_viewport(title="Wire Bundle Optimizer", width=600, height=600)
 
-    lim = outer_radius + np.max(radii)
-    ax.set_xlim(-lim, lim)
-    ax.set_ylim(-lim, lim)
-    ax.grid(True)
-    plt.show()
+        with dpg.window(
+            label="Wire Bundle Configurator",
+            tag="main_window",
+            pos=(0, 0),
+            width=-1,
+            height=-1,
+        ):
+            dpg.add_text("Define wire types:")
+            dpg.add_input_int(
+                label="Count", default_value=1, tag="input_count", min_value=1
+            )
+            dpg.add_input_double(
+                label="Diameter", default_value=1.0, tag="input_diameter", min_value=0.1
+            )
+            dpg.add_button(label="Add Wire Type", callback=self._add_wire_callback)
+
+            dpg.add_spacing(count=1)
+            dpg.add_text("Current wire types:")
+            dpg.add_listbox(items=[], tag="wire_listbox", num_items=8, width=-1)
+
+            # Optimization parameters
+            dpg.add_spacing(count=1)
+            dpg.add_input_int(
+                label="Initializations", default_value=4, tag="input_inits", min_value=1
+            )
+            dpg.add_text(
+                "Number of random starts; more chances to find a better global optimum but increases compute time.",
+                wrap=300,
+            )
+            dpg.add_input_int(
+                label="Max Iterations",
+                default_value=200,
+                tag="input_maxiter",
+                min_value=1,
+            )
+            dpg.add_text(
+                "Maximum iterations per initialization; higher values improve local convergence but slow runtime.",
+                wrap=300,
+            )
+
+            dpg.add_spacing(count=1)
+            dpg.add_button(label="Optimize & Plot", callback=self._optimize_callback)
+
+            dpg.add_spacing(count=1)
+            dpg.add_text("GUI Scale")
+            dpg.add_slider_float(
+                label="Scale Factor",
+                tag="scale_slider",
+                default_value=self.scale_factor,
+                min_value=0.5,
+                max_value=3.0,
+                callback=self._scale_callback,
+            )
+
+        dpg.set_primary_window("main_window", True)
+        dpg.setup_dearpygui()
+
+    def _update_wire_list(self) -> None:
+        """Refresh listbox content from wire_defs."""
+        items = [f"{cnt} × {dia}" for cnt, dia in self.wire_defs]
+        dpg.configure_item("wire_listbox", items=items)
+
+    def _add_wire_callback(self, sender: str, app_data: Any, user_data: Any) -> None:
+        """Add new wire type based on input widgets."""
+        count = dpg.get_value("input_count")
+        diameter = dpg.get_value("input_diameter")
+        if count > 0 and diameter > 0:
+            self.wire_defs.append((count, diameter))
+            self._update_wire_list()
+            dpg.set_value("input_count", 1)
+            dpg.set_value("input_diameter", 1.0)
+        else:
+            dpg.log_error("Please enter positive count and diameter.")
+
+    def _optimize_callback(self, sender: str, app_data: Any, user_data: Any) -> None:
+        """Run optimizer and display the resulting layout plot."""
+        radii: List[float] = [d / 2.0 for cnt, d in self.wire_defs for _ in range(cnt)]
+        if not radii:
+            dpg.log_error("No wires defined!")
+            return
+
+        # Fetch user-specified optimization params
+        n_inits: int = dpg.get_value("input_inits")
+        max_iter: int = dpg.get_value("input_maxiter")
+
+        optimizer = WireBundleOptimizer(radii)
+        positions, radii_arr, outer_radius = optimizer.solve_multi(
+            n_inits, max_iterations=max_iter, n_jobs=-1
+        )
+        print(f"Best outer diameter: {outer_radius * 2:.4f}")
+
+        dpi = int(100 * self.scale_factor)
+        fig, ax = plt.subplots(figsize=(6, 6), dpi=dpi)
+        ax.set_aspect("equal")
+        ax.set_title("Optimized Wire Bundle")
+        outer_circle = plt.Circle(
+            (0, 0), outer_radius, color="gray", fill=False, linestyle="--"
+        )
+        ax.add_patch(outer_circle)
+        for (x, y), r in zip(positions, radii_arr):
+            ax.add_patch(plt.Circle((x, y), r, alpha=0.6))
+        lim = outer_radius + max(radii_arr)
+        ax.set_xlim(-lim, lim)
+        ax.set_ylim(-lim, lim)
+        ax.grid(True)
+        plt.show()
+
+    def _scale_callback(self, sender: str, scale: float, user_data: Any) -> None:
+        """Adjust GUI font scale."""
+        self.scale_factor = scale
+        dpg.set_global_font_scale(self.scale_factor)
+
+    def run(self) -> None:
+        """Show the viewport and start the GUI event loop."""
+        dpg.show_viewport()
+        dpg.start_dearpygui()
+        dpg.destroy_context()
 
 
 def main() -> None:
-    radii = 3 * [8.1026 / 2] + 2 * [3.3 / 2] + 43 * [1.17 / 2]
-
-    optimizer = WireBundleOptimizer(radii)
-
-    positions, radii, outer_radius = optimizer.solve_multi(
-        500, max_iterations=200, n_jobs=-1
-    )
-    print(f"Best outer diameter: {outer_radius * 2:.4f}")
-
-    plot_wire_bundle(positions, radii, outer_radius)
+    app = WireBundleApp()
+    app.run()
 
 
 if __name__ == "__main__":
