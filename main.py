@@ -6,19 +6,52 @@ from typing import List, Tuple, Any
 
 
 class WireBundleApp:
-    """
-    DearPyGui application for defining wire bundles and optimizing their layout.
-    """
-
     def __init__(self) -> None:
         self.wire_defs: List[Tuple[int, float]] = []
-        self.scale_factor: float = 1.0
+        self.scale_factor: float = 1.4  # default zoom
         self._setup_gui()
 
     def _setup_gui(self) -> None:
         dpg.create_context()
         dpg.set_global_font_scale(self.scale_factor)
-        dpg.create_viewport(title="Wire Bundle Optimizer", width=600, height=600)
+        dpg.create_viewport(title="Wire Bundle Optimizer", width=800, height=850)
+
+        # Theme
+        with dpg.theme() as self.theme:
+            with dpg.theme_component(dpg.mvAll):
+                dpg.add_theme_color(
+                    dpg.mvThemeCol_WindowBg, (25, 25, 28), category=dpg.mvThemeCat_Core
+                )
+                dpg.add_theme_color(
+                    dpg.mvThemeCol_TitleBg, (35, 35, 38), category=dpg.mvThemeCat_Core
+                )
+                dpg.add_theme_color(
+                    dpg.mvThemeCol_Button, (45, 115, 245), category=dpg.mvThemeCat_Core
+                )
+                dpg.add_theme_color(
+                    dpg.mvThemeCol_ButtonHovered,
+                    (70, 140, 255),
+                    category=dpg.mvThemeCat_Core,
+                )
+                dpg.add_theme_color(
+                    dpg.mvThemeCol_FrameBgHovered,
+                    (60, 60, 70),
+                    category=dpg.mvThemeCat_Core,
+                )
+                dpg.add_theme_color(
+                    dpg.mvThemeCol_SliderGrab,
+                    (100, 150, 250),
+                    category=dpg.mvThemeCat_Core,
+                )
+                dpg.add_theme_style(
+                    dpg.mvStyleVar_FrameRounding, 5, category=dpg.mvThemeCat_Core
+                )
+                dpg.add_theme_style(
+                    dpg.mvStyleVar_FramePadding, 10, 6, category=dpg.mvThemeCat_Core
+                )
+                dpg.add_theme_style(
+                    dpg.mvStyleVar_ItemSpacing, 12, 8, category=dpg.mvThemeCat_Core
+                )
 
         with dpg.window(
             label="Wire Bundle Configurator",
@@ -27,43 +60,79 @@ class WireBundleApp:
             width=-1,
             height=-1,
         ):
-            dpg.add_text("Define wire types:")
-            dpg.add_input_int(
-                label="Count", default_value=1, tag="input_count", min_value=1
-            )
-            dpg.add_input_double(
-                label="Diameter", default_value=1.0, tag="input_diameter", min_value=0.1
-            )
-            dpg.add_button(label="Add Wire Type", callback=self._add_wire_callback)
+            dpg.bind_item_theme("main_window", self.theme)
+
+            # Section: Define wires
+            dpg.add_text("Define Wire Types", bullet=True)
+            dpg.add_spacing(count=1)
+
+            with dpg.group(horizontal=True):
+                dpg.add_input_int(
+                    label="Count",
+                    default_value=1,
+                    tag="input_count",
+                    width=150,
+                    min_value=1,
+                )
+                dpg.add_input_double(
+                    label="Diameter",
+                    default_value=1.0,
+                    tag="input_diameter",
+                    width=150,
+                    min_value=0.1,
+                )
+                dpg.add_button(
+                    label="Add Wire Type", callback=self._add_wire_callback, width=160
+                )
 
             dpg.add_spacing(count=1)
             dpg.add_text("Current wire types:")
-            dpg.add_listbox(items=[], tag="wire_listbox", num_items=8, width=-1)
+            dpg.add_listbox(items=[], tag="wire_listbox", num_items=6, width=-1)
 
-            # Optimization parameters
+            dpg.add_spacing(count=2)
+            dpg.add_separator()
+            dpg.add_spacing(count=2)
+
+            # Section: Optimization settings
+            dpg.add_text("Optimization Settings", bullet=True)
             dpg.add_spacing(count=1)
-            dpg.add_input_int(
-                label="Initializations", default_value=4, tag="input_inits", min_value=1
-            )
-            dpg.add_text(
-                "Number of random starts; more chances to find a better global optimum but increases compute time.",
-                wrap=300,
-            )
-            dpg.add_input_int(
-                label="Max Iterations",
-                default_value=200,
-                tag="input_maxiter",
-                min_value=1,
-            )
-            dpg.add_text(
-                "Maximum iterations per initialization; higher values improve local convergence but slow runtime.",
-                wrap=300,
+
+            with dpg.group(horizontal=True):
+                dpg.add_input_int(
+                    label="Initializations",
+                    default_value=4,
+                    tag="input_inits",
+                    width=150,
+                    min_value=1,
+                )
+                dpg.add_text(
+                    "More random starts → better global optimum\nbut slower compute time.",
+                    wrap=300,
+                )
+
+            with dpg.group(horizontal=True):
+                dpg.add_input_int(
+                    label="Max Iterations",
+                    default_value=200,
+                    tag="input_maxiter",
+                    width=150,
+                    min_value=1,
+                )
+                dpg.add_text(
+                    "Higher value improves local convergence\nbut increases runtime.",
+                    wrap=300,
+                )
+
+            dpg.add_spacing(count=2)
+            dpg.add_button(
+                label="Optimize & Plot", callback=self._optimize_callback, width=-1
             )
 
-            dpg.add_spacing(count=1)
-            dpg.add_button(label="Optimize & Plot", callback=self._optimize_callback)
+            dpg.add_spacing(count=3)
+            dpg.add_separator()
+            dpg.add_spacing(count=2)
 
-            dpg.add_spacing(count=1)
+            # Section: GUI scale
             dpg.add_text("GUI Scale")
             dpg.add_slider_float(
                 label="Scale Factor",
@@ -72,18 +141,17 @@ class WireBundleApp:
                 min_value=0.5,
                 max_value=3.0,
                 callback=self._scale_callback,
+                width=-1,
             )
 
         dpg.set_primary_window("main_window", True)
         dpg.setup_dearpygui()
 
     def _update_wire_list(self) -> None:
-        """Refresh listbox content from wire_defs."""
-        items = [f"{cnt} × {dia}" for cnt, dia in self.wire_defs]
+        items = [f"{cnt} × {round(dia, 3)}" for cnt, dia in self.wire_defs]
         dpg.configure_item("wire_listbox", items=items)
 
     def _add_wire_callback(self, sender: str, app_data: Any, user_data: Any) -> None:
-        """Add new wire type based on input widgets."""
         count = dpg.get_value("input_count")
         diameter = dpg.get_value("input_diameter")
         if count > 0 and diameter > 0:
@@ -95,13 +163,11 @@ class WireBundleApp:
             dpg.log_error("Please enter positive count and diameter.")
 
     def _optimize_callback(self, sender: str, app_data: Any, user_data: Any) -> None:
-        """Run optimizer and display the resulting layout plot."""
         radii: List[float] = [d / 2.0 for cnt, d in self.wire_defs for _ in range(cnt)]
         if not radii:
             dpg.log_error("No wires defined!")
             return
 
-        # Fetch user-specified optimization params
         n_inits: int = dpg.get_value("input_inits")
         max_iter: int = dpg.get_value("input_maxiter")
 
@@ -115,10 +181,9 @@ class WireBundleApp:
         fig, ax = plt.subplots(figsize=(6, 6), dpi=dpi)
         ax.set_aspect("equal")
         ax.set_title("Optimized Wire Bundle")
-        outer_circle = plt.Circle(
-            (0, 0), outer_radius, color="gray", fill=False, linestyle="--"
+        ax.add_patch(
+            plt.Circle((0, 0), outer_radius, color="gray", fill=False, linestyle="--")
         )
-        ax.add_patch(outer_circle)
         for (x, y), r in zip(positions, radii_arr):
             ax.add_patch(plt.Circle((x, y), r, alpha=0.6))
         lim = outer_radius + max(radii_arr)
@@ -128,12 +193,10 @@ class WireBundleApp:
         plt.show()
 
     def _scale_callback(self, sender: str, scale: float, user_data: Any) -> None:
-        """Adjust GUI font scale."""
         self.scale_factor = scale
         dpg.set_global_font_scale(self.scale_factor)
 
     def run(self) -> None:
-        """Show the viewport and start the GUI event loop."""
         dpg.show_viewport()
         dpg.start_dearpygui()
         dpg.destroy_context()
