@@ -1,0 +1,12 @@
+[project]
+name = "wire-bundle-optimizer"
+version = "0.1.0"
+description = "A Python-based optimization tool to efficiently pack circular wires into the smallest possible circular bundle. This project applies constrained nonlinear optimization using SciPy's SLSQP algorithm to find the most compact, non-overlapping arrangement of wires with varying radii."
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "joblib>=1.4.2",
+    "matplotlib>=3.7.5",
+    "numpy>=1.24.4",
+    "scipy>=1.10.1",
+]
