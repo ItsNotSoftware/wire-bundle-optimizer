@@ -1,10 +1,6 @@
 import numpy as np
 from scipy.optimize import minimize
-import matplotlib.pyplot as plt
 from joblib import Parallel, delayed
-
-MAX_ITER = 200
-N_SPAWNS = 20
 
 
 class WireBundleOptimizer:
@@ -198,7 +194,7 @@ class WireBundleOptimizer:
             method="SLSQP",
             jac=self._grad_objective,
             constraints=cons,
-            options={"maxiter": MAX_ITER, "ftol": 1e-12, "disp": False},
+            options={"maxiter": max_iterations, "ftol": 1e-12, "disp": False},
         )
 
         coords, R = self._unpack(res.x)
@@ -206,7 +202,7 @@ class WireBundleOptimizer:
 
     def solve_multi(
         self, n_initializations: int, max_iterations: int = 200, n_jobs: int = -1
-    ) -> tuple[np.ndarray, float]:
+    ) -> tuple[np.ndarray, np.ndarray, float]:
         """
         Run multiple parallel optimizations from varied initial guesses (spiral + random).
 
@@ -216,7 +212,7 @@ class WireBundleOptimizer:
             n_jobs (int): Number of parallel jobs to run. -1 means using all available cores.
 
         Returns:
-            Best (coords, diameter)
+            Tuple[np.ndarray, np.ndarray, float]: Best coordinates, radii, and bundle outer radius.
         """
         rng = np.random.default_rng()
         spiral_guess = self._initial_guess_spiral()
@@ -245,29 +241,4 @@ class WireBundleOptimizer:
 
         self.positions = best_coords
         self.outer_radius = best_radius
-        return best_coords, best_radius
-
-    def plot(self) -> None:
-        """
-        Plot the optimized wire bundle layout.
-        """
-        fig, ax = plt.subplots(figsize=(6, 6))
-        ax.set_aspect("equal")
-        ax.set_title("Optimized Wire Bundle")
-
-        # Draw outer circle
-        outer = plt.Circle(
-            (0, 0), self.outer_radius, color="gray", fill=False, linestyle="--"
-        )
-        ax.add_patch(outer)
-
-        # Draw each wire
-        for (x, y), r in zip(self.positions, self.radii):
-            c = plt.Circle((x, y), r, color="steelblue", alpha=0.6)
-            ax.add_patch(c)
-
-        lim = self.outer_radius + np.max(self.radii)
-        ax.set_xlim(-lim, lim)
-        ax.set_ylim(-lim, lim)
-        ax.grid(True)
-        plt.show()
+        return best_coords, self.radii, best_radius
