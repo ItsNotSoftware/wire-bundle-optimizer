@@ -102,6 +102,7 @@ class WireBundleApp(QWidget):
 
         self.count_input = QSpinBox()
         self.count_input.setMinimum(1)
+        self.count_input.setMaximum(500)
         self.count_input.setFixedWidth(70)
 
         self.diameter_input = QDoubleSpinBox()
@@ -110,7 +111,6 @@ class WireBundleApp(QWidget):
         self.diameter_input.setValue(1.0)
         self.diameter_input.setFixedWidth(90)
 
-        # --- Improved Color Palette ---
         self.color_palette = [
             "#007acc",
             "#cc0000",
@@ -130,6 +130,7 @@ class WireBundleApp(QWidget):
             btn.setStyleSheet(
                 self._color_button_style(color, selected=(color == self.selected_color))
             )
+            btn.setFixedSize(20, 20)
             btn.clicked.connect(lambda _, c=color: self._set_color(c))
             self.color_buttons.append(btn)
             self.color_picker_layout.addWidget(btn)
@@ -140,7 +141,7 @@ class WireBundleApp(QWidget):
 
         wire_layout.addWidget(QLabel("Count:"), 0, 0)
         wire_layout.addWidget(self.count_input, 0, 1)
-        wire_layout.addWidget(QLabel("Diameter:"), 0, 2)
+        wire_layout.addWidget(QLabel("Diameter (mm):"), 0, 2)
         wire_layout.addWidget(self.diameter_input, 0, 3)
         wire_layout.addLayout(self.color_picker_layout, 0, 4, 1, 3)
         wire_layout.addWidget(self.add_button, 0, 7)
@@ -164,7 +165,8 @@ class WireBundleApp(QWidget):
 
         self.max_iter_input = QSpinBox()
         self.max_iter_input.setMinimum(1)
-        self.max_iter_input.setValue(200)
+        self.max_iter_input.setMaximum(1000)
+        self.max_iter_input.setValue(600)
         self.max_iter_input.setFixedWidth(70)
 
         opt_layout.addWidget(QLabel("Initializations:"), 0, 0)
@@ -190,6 +192,12 @@ class WireBundleApp(QWidget):
         self.optimize_button.clicked.connect(self._optimize)
         layout.addWidget(self.optimize_button)
 
+        # === NEW Separator below Optimize button ===
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(sep)
+
         self.diameter_label = QLabel("")
         layout.addWidget(self.diameter_label)
 
@@ -205,12 +213,8 @@ class WireBundleApp(QWidget):
         Return style string for a color button.
         """
         border = "2px solid black" if selected else "1px solid #444"
-        size = "26px" if selected else "22px"
         return (
-            f"background-color: {color}; "
-            f"border: {border}; "
-            f"border-radius: 4px;"
-            f"min-width: {size}; min-height: {size}; max-width: {size}; max-height: {size};"
+            f"background-color: {color}; " f"border: {border}; " f"border-radius: 10px;"
         )
 
     def _set_color(self, color: str) -> None:
