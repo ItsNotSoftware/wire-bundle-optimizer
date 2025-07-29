@@ -68,7 +68,7 @@ class WireBundleApp:
 
             # Section: Define wires
             dpg.add_text("Define Wire Types", bullet=True)
-            dpg.add_spacing(count=1)
+            dpg.add_spacer(height=5)
             with dpg.group(horizontal=True):
                 dpg.add_input_int(
                     label="Count    ",
@@ -90,17 +90,17 @@ class WireBundleApp:
                     label="Add Wire Type", callback=self._add_wire_callback, width=220
                 )
 
-            dpg.add_spacing(count=1)
+            dpg.add_spacer(height=5)
             dpg.add_text("Current wire types:")
             dpg.add_listbox(items=[], tag="wire_listbox", num_items=6, width=-1)
 
-            dpg.add_spacing(count=2)
+            dpg.add_spacer(height=10)
             dpg.add_separator()
-            dpg.add_spacing(count=4)
+            dpg.add_spacer(height=20)
 
             # Section: Optimization settings
             dpg.add_text("Optimization Settings", bullet=True)
-            dpg.add_spacing(count=1)
+            dpg.add_spacer(height=5)
             with dpg.group(horizontal=True):
                 dpg.add_input_int(
                     label="Initializations - ",
@@ -127,14 +127,14 @@ class WireBundleApp:
                     wrap=1000,
                 )
 
-            dpg.add_spacing(count=8)
+            dpg.add_spacer(height=40)
             dpg.add_button(
                 label="Optimize & Plot", callback=self._optimize_callback, width=-1
             )
 
-            dpg.add_spacing(count=14)
+            dpg.add_spacer(height=70)
             dpg.add_separator()
-            dpg.add_spacing(count=2)
+            dpg.add_spacer(height=10)
 
             # Section: GUI scale
             dpg.add_text("GUI Scale")
@@ -184,7 +184,7 @@ class WireBundleApp:
             dpg.set_value("input_diameter", 1.0)
 
         else:
-            dpg.log_error("Please enter positive count and diameter.")
+            print("Please enter positive count and diameter.")
 
     def _optimize_callback(self, sender: str, app_data: Any, user_data: Any) -> None:
         """
@@ -200,7 +200,7 @@ class WireBundleApp:
         radii = [d / 2.0 for cnt, d in self.wire_defs for _ in range(cnt)]
 
         if not radii:
-            dpg.log_error("No wires defined!")
+            print("No wires defined!")
             return
 
         # Get optimization parameters (input)
