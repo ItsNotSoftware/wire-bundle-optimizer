@@ -89,7 +89,7 @@ class WireBundleApp(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Wire Bundle Optimizer")
-        self.wire_defs: List[Tuple[int, float, str]] = []
+        self.wire_defs = []
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -97,16 +97,19 @@ class WireBundleApp(QWidget):
         layout.setSpacing(10)
 
         # === Wire input section ===
+        layout.addWidget(QLabel("<b>1. Define Wire Types</b>"))
+
         wire_layout = QGridLayout()
         wire_layout.setHorizontalSpacing(8)
 
         self.count_input = QSpinBox()
         self.count_input.setMinimum(1)
-        self.count_input.setMaximum(500)
+        self.count_input.setMaximum(999)
         self.count_input.setFixedWidth(70)
 
         self.diameter_input = QDoubleSpinBox()
         self.diameter_input.setMinimum(0.01)
+        self.diameter_input.setMaximum(1000.0)
         self.diameter_input.setDecimals(3)
         self.diameter_input.setValue(1.0)
         self.diameter_input.setFixedWidth(90)
@@ -148,13 +151,13 @@ class WireBundleApp(QWidget):
 
         layout.addLayout(wire_layout)
 
-        # === Separator ===
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(line)
 
         # === Optimization Parameters ===
+        layout.addWidget(QLabel("<b>2. Optimization Parameters</b>"))
         opt_layout = QGridLayout()
         opt_layout.setHorizontalSpacing(8)
 
@@ -177,6 +180,7 @@ class WireBundleApp(QWidget):
         layout.addLayout(opt_layout)
 
         # === Wire list + controls ===
+        layout.addWidget(QLabel("3. Defined Wires"))
         self.wire_list = QListWidget()
         self.wire_list.setFixedHeight(80)
         layout.addWidget(self.wire_list)
@@ -192,12 +196,12 @@ class WireBundleApp(QWidget):
         self.optimize_button.clicked.connect(self._optimize)
         layout.addWidget(self.optimize_button)
 
-        # === NEW Separator below Optimize button ===
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(sep)
 
+        layout.addWidget(QLabel("<b>4. Results </b>"))
         self.diameter_label = QLabel("")
         layout.addWidget(self.diameter_label)
 
@@ -257,10 +261,8 @@ class WireBundleApp(QWidget):
             self.wire_list.addItem(item)
 
     def _optimize(self) -> None:
-        radii: List[float] = [
-            d / 2.0 for cnt, d, _ in self.wire_defs for _ in range(cnt)
-        ]
-        colors: List[str] = [c for cnt, _, c in self.wire_defs for _ in range(cnt)]
+        radii = [d / 2 for cnt, d, _ in self.wire_defs for _ in range(cnt)]
+        colors = [c for cnt, _, c in self.wire_defs for _ in range(cnt)]
 
         if not radii:
             QMessageBox.warning(self, "Input Error", "No wires defined.")
@@ -274,7 +276,9 @@ class WireBundleApp(QWidget):
         )
 
         self.plot_widget.update_data(coords, radii_arr, R, colors)
-        self.diameter_label.setText(f"Outer diameter: {R:.3f} mm / {R / 25.4:.3f} in")
+        self.diameter_label.setText(
+            f"Outer diameter: {(R*2):.3f} mm / {R / 25.4:.3f} in"
+        )
 
 
 def main() -> None:
