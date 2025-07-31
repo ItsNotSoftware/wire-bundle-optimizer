@@ -5,9 +5,7 @@ description = "A Python-based optimization tool to efficiently pack circular wir
 readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
-    "dearpygui>=2.1.0",
     "joblib>=1.4.2",
-    "matplotlib>=3.7.5",
     "numpy>=1.24.4",
     "pyqt6>=6.7.1",
     "scipy>=1.10.1",

@@ -1,5 +1,5 @@
 import sys
-from typing import List, Tuple
+from typing import List
 import numpy as np
 from PyQt6.QtWidgets import (
     QApplication,
