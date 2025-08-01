@@ -13,7 +13,8 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QDoubleSpinBox,
     QMessageBox,
-    QGridLayout,
+    QFormLayout,
+    QGroupBox,
     QFrame,
     QListWidgetItem,
     QComboBox,
@@ -135,38 +136,12 @@ class WireBundleApp(QWidget):
 
     def _setup_ui(self) -> None:
         """Set up the user interface for the wire bundle optimizer."""
+        # Root layout
         layout = QVBoxLayout()
-        layout.setSpacing(10)
+        layout.setSpacing(12)
 
-        # === Wire input section ===
-        layout.addWidget(QLabel("<b>1. Define Wire Types</b>"))
-        wire_layout = QGridLayout()
-        wire_layout.setHorizontalSpacing(8)
-
-        # Wire count input
-        self.count_input = QSpinBox()
-        self.count_input.setMinimum(1)
-        self.count_input.setMaximum(999)
-        self.count_input.setFixedWidth(70)
-
-        # Diameter input
-        self.diameter_input = QDoubleSpinBox()
-        self.diameter_input.setMinimum(0.01)
-        self.diameter_input.setMaximum(1000.0)
-        self.diameter_input.setDecimals(3)
-        self.diameter_input.setValue(1.0)
-        self.diameter_input.setFixedWidth(90)
-
-        # Predefined selector
-        self.use_predef_checkbox = QCheckBox("Use Predefined Size")
-        self.use_predef_checkbox.setChecked(False)
-        self.use_predef_checkbox.stateChanged.connect(self._toggle_diameter_mode)
-
-        self.predef_selector = QComboBox()
-        self.predef_selector.addItems(self.predefined_types.keys())
-        self.predef_selector.setEnabled(False)
-
-        # Color selection
+        # ─── Section 1: Define Wire Types ────────────────────────────────────────────
+        # Prepare color palette attributes
         self.color_palette = [
             "#007acc",
             "#cc0000",
@@ -177,77 +152,92 @@ class WireBundleApp(QWidget):
         ]
         self.selected_color = self.color_palette[0]
         self.color_buttons: List[QPushButton] = []
-        self.color_picker_layout = QHBoxLayout()
-        self.color_picker_layout.setSpacing(6)
-        self.color_picker_layout.addWidget(QLabel("Color:"))
 
-        # Create color buttons
+        wire_group = QGroupBox("1. Define Wire Types")
+        wire_form = QFormLayout()
+        wire_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        wire_form.setFormAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+        )
+        wire_form.setHorizontalSpacing(20)
+        wire_form.setVerticalSpacing(8)
+
+        # Count
+        self.count_input = QSpinBox()
+        self.count_input.setRange(1, 999)
+        self.count_input.setFixedWidth(70)
+        wire_form.addRow("Count:", self.count_input)
+
+        # Predefined size checkbox + selector
+        predef_layout = QHBoxLayout()
+        self.use_predef_checkbox = QCheckBox()
+        self.use_predef_checkbox.setToolTip("Pick from standard wire sizes")
+        self.use_predef_checkbox.stateChanged.connect(self._toggle_diameter_mode)
+        self.predef_selector = QComboBox()
+        self.predef_selector.addItems(self.predefined_types.keys())
+        self.predef_selector.setEnabled(False)
+        predef_layout.addWidget(self.use_predef_checkbox)
+        predef_layout.addWidget(QLabel("Use predefined"))
+        predef_layout.addSpacing(10)
+        predef_layout.addWidget(self.predef_selector)
+        wire_form.addRow("", predef_layout)
+
+        # Diameter
+        self.diameter_input = QDoubleSpinBox()
+        self.diameter_input.setRange(0.01, 1000.0)
+        self.diameter_input.setDecimals(3)
+        self.diameter_input.setValue(1.0)
+        self.diameter_input.setFixedWidth(90)
+        wire_form.addRow("Diameter (mm):", self.diameter_input)
+
+        # Color picker
+        color_layout = QHBoxLayout()
         for color in self.color_palette:
             btn = QPushButton()
+            btn.setFixedSize(20, 20)
             btn.setStyleSheet(
                 self._color_button_style(color, selected=(color == self.selected_color))
             )
-            btn.setFixedSize(20, 20)
             btn.clicked.connect(lambda _, c=color: self._set_color(c))
             self.color_buttons.append(btn)
-            self.color_picker_layout.addWidget(btn)
+            color_layout.addWidget(btn)
+        wire_form.addRow("Color:", color_layout)
 
-        # Add wire button
+        # Add Wire button
         self.add_button = QPushButton("Add Wire")
         self.add_button.setFixedHeight(28)
         self.add_button.clicked.connect(self._add_wire)
+        wire_form.addRow("", self.add_button)
 
-        # Layouts for count and diameter
-        count_layout = QHBoxLayout()
-        count_layout.setSpacing(4)
-        count_layout.addWidget(QLabel("Count:"))
-        count_layout.addWidget(self.count_input)
+        wire_group.setLayout(wire_form)
+        layout.addWidget(wire_group)
 
-        diam_layout = QHBoxLayout()
-        diam_layout.setSpacing(4)
-        diam_layout.addWidget(self.use_predef_checkbox)
-        diam_layout.addWidget(QLabel("Diameter (mm):"))
-        diam_layout.addWidget(self.diameter_input)
-        diam_layout.addWidget(self.predef_selector)
+        # ─── Section 2: Optimization Parameters ─────────────────────────────────────
+        opt_group = QGroupBox("2. Optimization Parameters")
+        opt_layout = QHBoxLayout()
+        opt_layout.setSpacing(20)
 
-        wire_layout.addLayout(count_layout, 0, 0, 1, 2)
-        wire_layout.addLayout(diam_layout, 0, 2, 1, 3)
-        wire_layout.addLayout(self.color_picker_layout, 0, 5, 1, 2)
-        wire_layout.addWidget(self.add_button, 0, 7)
-        layout.addLayout(wire_layout)
-
-        # Separator
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.HLine)
-        line.setFrameShadow(QFrame.Shadow.Sunken)
-        layout.addWidget(line)
-
-        # === Optimization section ===
-        layout.addWidget(QLabel("<b>2. Optimization Parameters</b>"))
-        opt_layout = QGridLayout()
-        opt_layout.setHorizontalSpacing(8)
-
+        opt_layout.addWidget(QLabel("Solver Initializations:"))
         self.inits_input = QSpinBox()
-        self.inits_input.setMinimum(1)
+        self.inits_input.setRange(1, 1000)
         self.inits_input.setValue(8)
         self.inits_input.setFixedWidth(70)
+        opt_layout.addWidget(self.inits_input)
 
+        opt_layout.addWidget(QLabel("Max Solver Iterations:"))
         self.max_iter_input = QSpinBox()
-        self.max_iter_input.setMinimum(1)
-        self.max_iter_input.setMaximum(10000)
+        self.max_iter_input.setRange(1, 10000)
         self.max_iter_input.setValue(2000)
         self.max_iter_input.setFixedWidth(70)
+        opt_layout.addWidget(self.max_iter_input)
 
-        opt_layout.addWidget(QLabel("Solver Initializations:"), 0, 0)
-        opt_layout.addWidget(self.inits_input, 0, 1)
-        opt_layout.addWidget(QLabel("Max Solver Iterations:"), 0, 2)
-        opt_layout.addWidget(self.max_iter_input, 0, 3)
-        layout.addLayout(opt_layout)
+        opt_group.setLayout(opt_layout)
+        layout.addWidget(opt_group)
 
-        # === Wire list + controls ===
+        # ─── Section 3: Defined Wires ───────────────────────────────────────────────
         layout.addWidget(QLabel("3. Defined Wires"))
         self.wire_list = QListWidget()
-        self.wire_list.setFixedHeight(80)
+        self.wire_list.setFixedHeight(90)
         layout.addWidget(self.wire_list)
 
         remove_button = QPushButton("Remove Selected")
@@ -255,7 +245,7 @@ class WireBundleApp(QWidget):
         remove_button.clicked.connect(self._remove_selected_wire)
         layout.addWidget(remove_button)
 
-        # === Optimize and results ===
+        # ─── Section 4: Optimize & Results ─────────────────────────────────────────
         self.optimize_button = QPushButton("Optimize and Plot")
         self.optimize_button.setFixedHeight(32)
         self.optimize_button.clicked.connect(self._optimize)
@@ -266,15 +256,16 @@ class WireBundleApp(QWidget):
         sep.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(sep)
 
-        layout.addWidget(QLabel("<b>4. Results </b>"))
+        layout.addWidget(QLabel("<b>4. Results</b>"))
         self.diameter_label = QLabel("")
         layout.addWidget(self.diameter_label)
 
         self.plot_widget = WirePlotWidget()
         layout.addWidget(self.plot_widget)
 
+        # Finalize
         self.setLayout(layout)
-        self.setMinimumSize(500, 580)
+        self.setMinimumSize(550, 600)
 
     def _toggle_diameter_mode(self, state: int) -> None:
         """Enable or disable predefined wire type selection."""
