@@ -38,3 +38,31 @@ The optimization problem is defined as follows:
   - Optimized coordinates `(x_i, y_i)` for each wire  
   - Final minimized outer **diameter** (`2 * R`)  
   - 2D plot of the wire layout and enclosing circle
+
+## 🚀 How to Run
+
+To run the optimizer, you have two options:
+
+### Option 1: Using `uv` (recommended)
+
+If you have [`uv`](https://github.com/astral-sh/uv) installed:
+
+```bash
+uv run main.py
+````
+
+This will automatically set up a virtual environment and install all dependencies.
+
+### Option 2: Manual Setup with `pip`
+
+If you're not using `uv`, you can install the dependencies manually. Look inside `pyproject.toml` and install the required packages with:
+
+```bash
+pip install <dependency1> <dependency2> ...
+```
+
+Then run the optimizer:
+
+```bash
+python main.py
+```
