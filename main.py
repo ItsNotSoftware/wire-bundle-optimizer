@@ -20,6 +20,12 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
+# This fixes multiple windows spawning issues on Windows when using multiprocessing.
+from multiprocessing import freeze_support
+
+freeze_support()
+####
+
 import sys
 import yaml
 import numpy as np
@@ -251,27 +257,51 @@ class WireBundleApp(QWidget):
         layout.addWidget(wire_group)
 
         # ─── Section 2: Optimization Parameters ─────────────────────────────────
+        # ─── Section 2: Optimization Parameters ─────────────────────────────────
         opt_group = QGroupBox("2. Optimization Parameters")
-        opt_layout = QHBoxLayout()
-        opt_layout.setSpacing(20)
+        opt_main_layout = QVBoxLayout()
 
-        opt_layout.addWidget(
+        # First row: initializations + max iterations
+        row1_layout = QHBoxLayout()
+        row1_layout.setSpacing(20)
+
+        row1_layout.addWidget(
             QLabel("Number of Solver Initializations (higher = better, slower):")
         )
         self.inits_input = QSpinBox()
         self.inits_input.setRange(1, 1000)
         self.inits_input.setValue(8)
         self.inits_input.setFixedWidth(70)
-        opt_layout.addWidget(self.inits_input)
+        row1_layout.addWidget(self.inits_input)
 
-        opt_layout.addWidget(QLabel("Max Solver Iterations:"))
+        row1_layout.addWidget(QLabel("Max Solver Iterations:"))
         self.max_iter_input = QSpinBox()
         self.max_iter_input.setRange(1, 10000)
         self.max_iter_input.setValue(2000)
         self.max_iter_input.setFixedWidth(70)
-        opt_layout.addWidget(self.max_iter_input)
+        row1_layout.addWidget(self.max_iter_input)
 
-        opt_group.setLayout(opt_layout)
+        opt_main_layout.addLayout(row1_layout)
+
+        row2_layout = QHBoxLayout()
+        row2_layout.setSpacing(20)
+
+        row2_layout.addWidget(
+            QLabel(
+                "Manufacturing Tolerance Margin (Extra spacing added between wires to allow for manufacturing tolerances):"
+            )
+        )
+        self.margin_input = QDoubleSpinBox()
+        self.margin_input.setRange(0.0, 100.0)
+        self.margin_input.setSuffix(" %")
+        self.margin_input.setDecimals(1)
+        self.margin_input.setValue(0.0)
+        self.margin_input.setFixedWidth(80)
+        row2_layout.addWidget(self.margin_input)
+
+        opt_main_layout.addLayout(row2_layout)
+
+        opt_group.setLayout(opt_main_layout)
         layout.addWidget(opt_group)
 
         # ─── Section 3: Defined Wires ─────────────────────────────────────────
@@ -372,7 +402,7 @@ class WireBundleApp(QWidget):
             QMessageBox.warning(self, "Input Error", "No wires defined.")
             return
 
-        optimizer = WireBundleOptimizer(radii)
+        optimizer = WireBundleOptimizer(radii, margin=self.margin_input.value() / 100.0)
         coords, radii_arr, R = optimizer.solve_multi(
             n_initializations=self.inits_input.value(),
             max_iterations=self.max_iter_input.value(),

@@ -28,15 +28,17 @@ from joblib import Parallel, delayed
 
 
 class WireBundleOptimizer:
-    def __init__(self, radii: list[float]) -> None:
+    def __init__(self, radii: list[float], margin: float) -> None:
         """
         Initialize the optimizer with the given wire radii.
 
         Parameters:
             radii (list[float]): List of wire radii.
+            margin (float): Margin to add between wires to account for manufacturing.
         """
         self.radii = np.array(radii, dtype=float)
         self.n = len(radii)  # number of wires
+        self.margin = margin
 
         # upper triangle indices for unique wire pairs
         self.i_idx, self.j_idx = np.triu_indices(self.n, 1)
@@ -95,7 +97,8 @@ class WireBundleOptimizer:
             np.ndarray: Array of constraints for each wire.
         """
         coords, R = self._unpack(x)
-        return R - (np.linalg.norm(coords, axis=1) + self.radii)
+        effective_radii = self.radii + self.margin
+        return R - (np.linalg.norm(coords, axis=1) + effective_radii)
 
     def _jac_constraint_origin(self, x: np.ndarray) -> np.ndarray:
         """
@@ -131,7 +134,9 @@ class WireBundleOptimizer:
         coords, _ = self._unpack(x)
         diffs = coords[self.i_idx] - coords[self.j_idx]  # Pairwise differences
         d_centers = np.linalg.norm(diffs, axis=1)  # Distances between wire centers
-        min_allowed = self.radii[self.i_idx] + self.radii[self.j_idx]
+        r_eff = self.radii + self.margin
+        min_allowed = r_eff[self.i_idx] + r_eff[self.j_idx]
+
         return d_centers - min_allowed
 
     def _jac_constraint_pairs(self, x: np.ndarray) -> np.ndarray:
