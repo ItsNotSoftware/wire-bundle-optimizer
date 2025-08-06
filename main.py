@@ -20,11 +20,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
-# This fixes multiple windows spawning issues on Windows when using multiprocessing.
-from multiprocessing import freeze_support
+from joblib import parallel_backend
 
-freeze_support()
-####
+# This line fixes bug in Windows devices
+parallel_backend("threading")
 
 import sys
 import yaml
