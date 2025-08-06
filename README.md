@@ -1,10 +1,6 @@
 # 🚀 Wire Bundle Optimizer
 
-![App](app.png)
-
 A Python-based app to tightly arrange circular wires of varying radii within the smallest possible circular cross-section — **minimizing diameter** while ensuring **no overlaps**.
-
-This project was inspired by a real-world engineering challenge at **Rocket Factory Augsburg**: routing hundreds of wires through a constrained tunnel inside a **rocket fuel tank**.
 
 The tool supports:
 
@@ -70,3 +66,5 @@ Then run the optimizer:
 ```bash
 python main.py
 ```
+
+![App](app.png)
