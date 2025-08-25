@@ -20,15 +20,17 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
+from __future__ import annotations
+
 from joblib import parallel_backend
 
-# This line fixes bug in Windows devices
-parallel_backend("threading")
+parallel_backend("threading")  # Fixes a Windows devices bug for joblib
 
 import sys
 import yaml
 import numpy as np
-from typing import List
+from typing import List, Dict, Any
+
 from PyQt6.QtWidgets import (
     QApplication,
     QWidget,
@@ -46,25 +48,23 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QFrame,
     QListWidgetItem,
+    QScrollArea,
+    QSizePolicy,
 )
-from PyQt6.QtGui import QPainter, QPen, QColor
+from PyQt6.QtGui import QPainter, QPen, QColor, QBrush
 from PyQt6.QtCore import Qt
+
 from optimizer import WireBundleOptimizer
 
 
 def load_wire_types(filepath: str = "wire_types.yaml") -> dict:
-    """
-    Load predefined wire types from a YAML file.
-
-    Parameters:
-        filepath (str): Path to the YAML file containing wire definitions.
-
-    Returns:
-        dict: Dictionary mapping wire type names to diameters in mm.
-    """
+    """Load predefined wire types from a YAML file."""
     try:
         with open(filepath, "r") as f:
-            return yaml.safe_load(f)
+            data = yaml.safe_load(f) or {}
+            if not isinstance(data, dict):
+                return {}
+            return data
     except FileNotFoundError:
         QMessageBox.warning(
             None,
@@ -76,105 +76,207 @@ def load_wire_types(filepath: str = "wire_types.yaml") -> dict:
 
 class WirePlotWidget(QWidget):
     """
-    QWidget that visualizes the wire bundle layout.
+    QWidget that visualizes the wire bundle layout including previously
+    optimized shielded layers.
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        """
-        Initialize the plot widget.
-
-        Parameters:
-            parent (QWidget | None): Parent widget.
-        """
         super().__init__(parent)
-        self.positions = np.array([])
+        self.positions = np.empty((0, 2))
         self.radii = np.array([])
         self.outer_radius = 0.0
-        self.colors = []
+        self.colors: List[str] = []
+
+        # Layers history: list of dicts:
+        # { "coords": Nx2, "radii": N, "colors": [..], "inner_R": float, "outer_R": float }
+        self.layers: List[Dict[str, Any]] = []
+
+        # Current frozen core radius (inner exclusion for current run)
+        self.inner_exclusion_radius: float = 0.0
+
         self.setMinimumSize(300, 300)
 
-    def update_data(
+    def set_layers(
+        self, layers: List[Dict[str, Any]], inner_exclusion_radius: float
+    ) -> None:
+        self.layers = layers
+        self.inner_exclusion_radius = float(inner_exclusion_radius)
+        self.update()
+
+    def update_scene(
         self,
         positions: np.ndarray,
         radii: np.ndarray,
         outer_radius: float,
         colors: List[str],
     ) -> None:
-        """
-        Update the plot data.
-
-        Parameters:
-            positions (np.ndarray): Wire positions as an Nx2 array.
-            radii (np.ndarray): Wire radii.
-            outer_radius (float): Outer radius of the bundle.
-            colors (List[str]): List of colors for each wire.
-        """
-        self.positions = positions
-        self.radii = radii
-        self.outer_radius = outer_radius
-        self.colors = colors
+        self.positions = positions if positions is not None else np.empty((0, 2))
+        self.radii = radii if radii is not None else np.array([])
+        self.outer_radius = float(outer_radius) if outer_radius is not None else 0.0
+        self.colors = colors or []
         self.update()
 
-    def paintEvent(self, event: any) -> None:
-        """
-        Paint event to draw the wires and outer boundary.
+    def _global_max_radius(self) -> float:
+        max_r = self.outer_radius
+        for L in self.layers:
+            max_r = max(max_r, float(L.get("outer_R", 0.0)))
+        # also show the inner exclusion ring if larger than outer_radius
+        max_r = max(max_r, self.inner_exclusion_radius)
+        # add some padding to avoid touching edges
+        return max_r * 1.05 if max_r > 0 else 1.0
 
-        Parameters:
-            event: Paint event.
-        """
-        if self.positions.size == 0:
-            return
-
+    def paintEvent(self, a0) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Determine scale based on widget size
         w, h = self.width(), self.height()
-        scale = min(w, h) / (2 * (self.outer_radius + np.max(self.radii)))
+        max_r = self._global_max_radius()
+        if max_r <= 0:
+            return
+
+        scale = min(w, h) / (2 * (max_r))
         painter.translate(w / 2, h / 2)
 
-        # Draw outer boundary
-        outer_pen = QPen(QColor("gray"))
-        outer_pen.setStyle(Qt.PenStyle.DashLine)
-        painter.setPen(outer_pen)
-        painter.drawEllipse(
-            int(-self.outer_radius * scale),
-            int(-self.outer_radius * scale),
-            int(self.outer_radius * 2 * scale),
-            int(self.outer_radius * 2 * scale),
-        )
+        # Draw historical layers (shield rings + their wires)
+        for L in self.layers:
+            inner_R = float(L["inner_R"])
+            outer_R = float(L["outer_R"])
 
-        # Draw wires
+            # --- Shield ring: draw a true annulus (no "punching" the center) ---
+            from PyQt6.QtGui import QPainterPath
+
+            ring_path = QPainterPath()
+            # outer ellipse
+            ring_path.addEllipse(
+                int(-outer_R * scale),
+                int(-outer_R * scale),
+                int(2 * outer_R * scale),
+                int(2 * outer_R * scale),
+            )
+            # inner ellipse; OddEvenFill makes it a ring
+            ring_path.addEllipse(
+                int(-inner_R * scale),
+                int(-inner_R * scale),
+                int(2 * inner_R * scale),
+                int(2 * inner_R * scale),
+            )
+            ring_path.setFillRule(Qt.FillRule.OddEvenFill)
+
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(136, 136, 136, 90))  # soft grey
+            painter.drawPath(ring_path)
+
+            # ring outline
+            ring_pen = QPen(QColor("#888888"))
+            ring_pen.setWidth(1)
+            painter.setPen(ring_pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(
+                int(-outer_R * scale),
+                int(-outer_R * scale),
+                int(2 * outer_R * scale),
+                int(2 * outer_R * scale),
+            )
+            painter.drawEllipse(
+                int(-inner_R * scale),
+                int(-inner_R * scale),
+                int(2 * inner_R * scale),
+                int(2 * inner_R * scale),
+            )
+
+            # Wires of that layer
+            coords = L["coords"]
+            radii = L["radii"]
+            colors = L["colors"]
+            for (x, y), r, col in zip(coords, radii, colors):
+                painter.setPen(QPen(QColor(col)))
+                painter.setBrush(QBrush(QColor(col)))
+                painter.drawEllipse(
+                    int((x - r) * scale),
+                    int((y - r) * scale),
+                    int(2 * r * scale),
+                    int(2 * r * scale),
+                )
+
+        # Current inner exclusion ring
+        if self.inner_exclusion_radius > 0:
+            core_pen = QPen(QColor("#555555"))
+            core_pen.setStyle(Qt.PenStyle.DotLine)
+            painter.setPen(core_pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            R_in = self.inner_exclusion_radius
+            painter.drawEllipse(
+                int(-R_in * scale),
+                int(-R_in * scale),
+                int(2 * R_in * scale),
+                int(2 * R_in * scale),
+            )
+
+        # Current outer boundary (dashed)
+        if self.outer_radius > 0:
+            outer_pen = QPen(QColor("gray"))
+            outer_pen.setStyle(Qt.PenStyle.DashLine)
+            painter.setPen(outer_pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(
+                int(-self.outer_radius * scale),
+                int(-self.outer_radius * scale),
+                int(2 * self.outer_radius * scale),
+                int(2 * self.outer_radius * scale),
+            )
+
+        # Current wires
         for (x, y), r, color in zip(self.positions, self.radii, self.colors):
             painter.setPen(QPen(QColor(color)))
-            painter.setBrush(QColor(color))
+            painter.setBrush(QBrush(QColor(color)))
             painter.drawEllipse(
                 int((x - r) * scale),
                 int((y - r) * scale),
-                int(r * 2 * scale),
-                int(r * 2 * scale),
+                int(2 * r * scale),
+                int(2 * r * scale),
             )
 
 
 class WireBundleApp(QWidget):
     """
-    Main GUI application for defining wire types and optimizing layout.
+    Main GUI application for defining wire types, optimizing layout, and
+    layering shields.
     """
 
     def __init__(self) -> None:
-        """Initialize the main application window."""
         super().__init__()
         self.setWindowTitle("Wire Bundle Optimizer")
-        self.wire_defs = []  # Each wire is (count, diameter, color, label)
+
+        # Current working wire defs: list of tuples (count, diameter_mm, color, label)
+        self.wire_defs: List[tuple[int, float, str, str]] = []
+
+        # Record of previous layers (shielded cores)
+        self.layers: List[Dict[str, Any]] = []
+        self.frozen_core_radius: float = 0.0  # Inner exclusion radius for next runs
+
+        # Last optimization result (for promoting to a shielded layer)
+        self._last_coords: np.ndarray | None = None
+        self._last_radii: np.ndarray | None = None
+        self._last_R: float | None = None
+        self._last_colors: List[str] | None = None
+
         self.predefined_types = load_wire_types()
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        """Set up the user interface for the wire bundle optimizer."""
-        layout = QVBoxLayout()
+        # --- outer container with a scroll area so large content can be scrolled ---
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setSpacing(0)  # tight around the scroll area
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+        content = QWidget()  # actual content widget inside the scroll area
+        layout = QVBoxLayout(content)  # original layout now belongs to 'content'
         layout.setSpacing(12)
 
-        # Prepare color palette attributes
+        # Color palette
         self.color_palette = [
             "#007acc",
             "#cc0000",
@@ -186,7 +288,7 @@ class WireBundleApp(QWidget):
         self.selected_color = self.color_palette[0]
         self.color_buttons: List[QPushButton] = []
 
-        # ─── Section 1: Define Wire Types ────────────────────────────────────────
+        # ── Section 1: Define Wire Types ───────────────────────────────────────
         wire_group = QGroupBox("1. Define Wire Types")
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
@@ -204,7 +306,6 @@ class WireBundleApp(QWidget):
         size_layout = QHBoxLayout()
         size_layout.setSpacing(10)
 
-        # Custom diameter
         self.custom_radio = QRadioButton("Custom")
         self.custom_radio.toggled.connect(self._update_size_mode)
         size_layout.addWidget(self.custom_radio)
@@ -218,19 +319,16 @@ class WireBundleApp(QWidget):
 
         size_layout.addSpacing(20)
 
-        # Predefined size
         self.predef_size = QRadioButton("Predefined Sizes")
         self.predef_size.toggled.connect(self._update_size_mode)
         size_layout.addWidget(self.predef_size)
 
         self.predef_selector = QComboBox()
-        self.predef_selector.addItems(self.predefined_types.keys())
+        self.predef_selector.addItems(list(self.predefined_types.keys()))
         self.predef_selector.setEnabled(False)
         size_layout.addWidget(self.predef_selector)
 
         form.addRow("Wire Diameter (mm):", size_layout)
-
-        # Default to custom
         self.custom_radio.setChecked(True)
 
         # Color picker
@@ -246,7 +344,7 @@ class WireBundleApp(QWidget):
             color_layout.addWidget(btn)
         form.addRow("Color:", color_layout)
 
-        # Add Wire button
+        # Add Wire
         self.add_button = QPushButton("Add Wire")
         self.add_button.setFixedHeight(28)
         self.add_button.clicked.connect(self._add_wire)
@@ -255,15 +353,12 @@ class WireBundleApp(QWidget):
         wire_group.setLayout(form)
         layout.addWidget(wire_group)
 
-        # ─── Section 2: Optimization Parameters ─────────────────────────────────
-        # ─── Section 2: Optimization Parameters ─────────────────────────────────
+        # ── Section 2: Optimization Parameters ─────────────────────────────────
         opt_group = QGroupBox("2. Optimization Parameters")
         opt_main_layout = QVBoxLayout()
 
-        # First row: initializations + max iterations
         row1_layout = QHBoxLayout()
         row1_layout.setSpacing(20)
-
         row1_layout.addWidget(
             QLabel("Number of Solver Initializations (higher = better, slower):")
         )
@@ -279,16 +374,12 @@ class WireBundleApp(QWidget):
         self.max_iter_input.setValue(2000)
         self.max_iter_input.setFixedWidth(70)
         row1_layout.addWidget(self.max_iter_input)
-
         opt_main_layout.addLayout(row1_layout)
 
         row2_layout = QHBoxLayout()
         row2_layout.setSpacing(20)
-
         row2_layout.addWidget(
-            QLabel(
-                "Manufacturing Tolerance Margin (Extra spacing added between wires to allow for manufacturing tolerances):"
-            )
+            QLabel("Manufacturing Tolerance Margin (extra spacing between wires):")
         )
         self.margin_input = QDoubleSpinBox()
         self.margin_input.setRange(0.0, 100.0)
@@ -297,77 +388,115 @@ class WireBundleApp(QWidget):
         self.margin_input.setValue(0.0)
         self.margin_input.setFixedWidth(80)
         row2_layout.addWidget(self.margin_input)
-
         opt_main_layout.addLayout(row2_layout)
 
         opt_group.setLayout(opt_main_layout)
         layout.addWidget(opt_group)
 
-        # ─── Section 3: Defined Wires ─────────────────────────────────────────
+        # ── Section 3: Defined Wires ──────────────────────────────────────────
         layout.addWidget(QLabel("3. Defined Wires"))
         self.wire_list = QListWidget()
         self.wire_list.setFixedHeight(90)
         layout.addWidget(self.wire_list)
 
-        remove_button = QPushButton("Remove Selected")
+        row_remove = QHBoxLayout()
+        remove_button = QPushButton("Remove Selected Wire")
         remove_button.setFixedHeight(28)
         remove_button.clicked.connect(self._remove_selected_wire)
-        layout.addWidget(remove_button)
 
-        # ─── Section 4: Optimize & Results ────────────────────────────────────
+        clear_all_btn = QPushButton("Clear All")
+        clear_all_btn.setFixedHeight(28)
+        clear_all_btn.setToolTip("Clear all layers, results and defined wires.")
+        clear_all_btn.clicked.connect(self._clear_all)
+
+        row_remove.addWidget(remove_button)
+        row_remove.addWidget(clear_all_btn)
+        layout.addLayout(row_remove)
+
+        # ── Section 4: Shielding ──────────────────────────────────────────────
+        shield_group = QGroupBox(
+            "4. Shielding (optimize a bundle before adding shielding)"
+        )
+        shield_form = QFormLayout()
+        shield_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        shield_form.setHorizontalSpacing(20)
+        shield_form.setVerticalSpacing(8)
+
+        self.shield_thickness = QDoubleSpinBox()
+        self.shield_thickness.setRange(0.01, 10000.0)
+        self.shield_thickness.setDecimals(3)
+        self.shield_thickness.setValue(0.1)
+        self.shield_thickness.setFixedWidth(100)
+
+        self.add_shield_btn = QPushButton("Add Shielding")
+        self.add_shield_btn.setToolTip(
+            "Promote the current optimized bundle to a shielded core."
+        )
+        self.add_shield_btn.setEnabled(False)  # visually disabled via stylesheet
+        self.add_shield_btn.clicked.connect(self._add_shielding)
+
+        shield_form.addRow("Shield thickness (mm):", self.shield_thickness)
+        shield_form.addRow("", self.add_shield_btn)
+        shield_group.setLayout(shield_form)
+        layout.addWidget(shield_group)
+
+        # ── Section 5: Optimize ───────────────────────────────────────────────
         self.optimize_button = QPushButton("Optimize and Plot")
         self.optimize_button.setFixedHeight(32)
         self.optimize_button.clicked.connect(self._optimize)
         layout.addWidget(self.optimize_button)
 
+        # Separator
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(sep)
 
-        layout.addWidget(QLabel("<b>4. Results</b>"))
+        # ── Section 6: Results ────────────────────────────────────────────────
+        layout.addWidget(QLabel("<b>6. Results</b>"))
         self.diameter_label = QLabel("")
         layout.addWidget(self.diameter_label)
 
         self.plot_widget = WirePlotWidget()
+        self.plot_widget.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
         layout.addWidget(self.plot_widget)
 
-        # Finalize
-        self.setLayout(layout)
-        self.setMinimumSize(550, 600)
+        # Mount content into the scroll area and finish
+        scroll.setWidget(content)
+        outer_layout.addWidget(scroll)
+
+        self.setMinimumSize(600, 640)
 
     def _update_size_mode(self) -> None:
-        """Enable the appropriate diameter input based on radio selection."""
         is_custom = self.custom_radio.isChecked()
         self.diameter_input.setEnabled(is_custom)
         self.predef_selector.setEnabled(not is_custom)
 
     def _color_button_style(self, color: str, selected: bool = False) -> str:
-        """Return button style with optional highlight."""
         border = "2px solid black" if selected else "1px solid #444"
         return f"background-color: {color}; border: {border}; border-radius: 10px;"
 
     def _set_color(self, color: str) -> None:
-        """Set the currently selected color and update UI."""
         self.selected_color = color
         for btn, col in zip(self.color_buttons, self.color_palette):
             is_selected = col == self.selected_color
             btn.setStyleSheet(self._color_button_style(col, is_selected))
 
     def _add_wire(self) -> None:
-        """Add a new wire group based on UI input."""
         count = self.count_input.value()
         if self.predef_size.isChecked():
             label = self.predef_selector.currentText()
-            diameter = self.predefined_types[label]
+            diameter = float(self.predefined_types[label])
         else:
             diameter = self.diameter_input.value()
             label = f"{diameter:.3f} mm"
         color = self.selected_color
 
-        # Merge with existing identical wires
+        # Merge with existing identical wires (same diameter & color)
         for i, (cnt, dia, col, lbl) in enumerate(self.wire_defs):
-            if abs(dia - diameter) < 1e-6 and col == color:
+            if abs(dia - diameter) < 1e-9 and col == color:
                 self.wire_defs[i] = (cnt + count, diameter, color, label)
                 self._refresh_list()
                 return
@@ -376,14 +505,12 @@ class WireBundleApp(QWidget):
         self._refresh_list()
 
     def _remove_selected_wire(self) -> None:
-        """Remove currently selected wire group."""
         row = self.wire_list.currentRow()
         if row >= 0:
             del self.wire_defs[row]
             self._refresh_list()
 
     def _refresh_list(self) -> None:
-        """Update the visual list of wires."""
         self.wire_list.clear()
         for cnt, dia, color, label in self.wire_defs:
             item = QListWidgetItem(f"{cnt} x {label}")
@@ -393,31 +520,146 @@ class WireBundleApp(QWidget):
             )
             self.wire_list.addItem(item)
 
+    def _undo_last_layer(self) -> None:
+        """
+        Remove the most recently added shielded layer.
+        Also remove any current (outside) wires to keep state consistent.
+        """
+        if not self.layers:
+            QMessageBox.information(
+                self, "Nothing to Undo", "No shield layers to remove."
+            )
+            return
+
+        # Pop last layer and restore frozen radius to previous outer_R (or 0)
+        self.layers.pop()
+        self.frozen_core_radius = self.layers[-1]["outer_R"] if self.layers else 0.0
+
+        # Discard any outside wires the user may have started defining
+        self.wire_defs.clear()
+        self._refresh_list()
+
+        # Reset last solution and UI controls
+        self._last_coords = None
+        self._last_radii = None
+        self._last_R = None
+        self._last_colors = None
+        self.add_shield_btn.setEnabled(False)
+
+        # Update plot
+        self.plot_widget.set_layers(self.layers, self.frozen_core_radius)
+        self.plot_widget.update_scene(np.empty((0, 2)), np.array([]), 0.0, [])
+
     def _optimize(self) -> None:
-        """Run layout optimization and update the plot."""
-        radii = [d / 2 for cnt, d, c, l in self.wire_defs for _ in range(cnt)]
+        radii = [d / 2.0 for cnt, d, c, l in self.wire_defs for _ in range(cnt)]
         colors = [c for cnt, d, c, l in self.wire_defs for _ in range(cnt)]
         if not radii:
             QMessageBox.warning(self, "Input Error", "No wires defined.")
             return
 
-        optimizer = WireBundleOptimizer(radii, margin=self.margin_input.value() / 100.0)
+        optimizer = WireBundleOptimizer(
+            radii=radii,
+            margin=self.margin_input.value() / 100.0,
+            inner_exclusion_radius=self.frozen_core_radius,
+        )
+
         coords, radii_arr, R = optimizer.solve_multi(
             n_initializations=self.inits_input.value(),
             max_iterations=self.max_iter_input.value(),
             n_jobs=-1,
         )
-        self.plot_widget.update_data(coords, radii_arr, R, colors)
+
+        self._last_coords = coords
+        self._last_radii = radii_arr
+        self._last_R = R
+        self._last_colors = colors
+
+        # Update plot (include history)
+        self.plot_widget.set_layers(self.layers, self.frozen_core_radius)
+        self.plot_widget.update_scene(coords, radii_arr, R, colors)
+
+        # Correct inches conversion (diameter in in)
         self.diameter_label.setText(
-            f"Outer diameter: {(R*2):.3f} mm / {R / 25.4:.3f} in"
+            f"Outer diameter: {(R*2):.3f} mm / {(R*2)/25.4:.3f} in"
         )
 
+        # Allow adding a shield layer based on this result
+        self.add_shield_btn.setEnabled(True)
 
-def main() -> None:
-    """Run the PyQt6 application."""
-    app = QApplication(sys.argv)
-    app.setStyleSheet(
+    def _add_shielding(self) -> None:
+        """Promote the current optimized bundle to a shielded layer and clear wires."""
+        if (
+            self._last_coords is None
+            or self._last_radii is None
+            or self._last_R is None
+            or self._last_colors is None
+        ):
+            QMessageBox.information(
+                self, "No Solution", "Optimize first, then add shielding."
+            )
+            return
+
+        thickness = self.shield_thickness.value()
+        if thickness <= 0:
+            QMessageBox.warning(
+                self, "Invalid Thickness", "Please set a positive shield thickness."
+            )
+            return
+
+        inner_R = float(self._last_R)
+        outer_R = inner_R + thickness
+
+        # Save the solved layer
+        self.layers.append(
+            {
+                "coords": np.array(self._last_coords, dtype=float).copy(),
+                "radii": np.array(self._last_radii, dtype=float).copy(),
+                "colors": list(self._last_colors),
+                "inner_R": inner_R,
+                "outer_R": outer_R,
+            }
+        )
+
+        # Freeze this core for next runs and clear current wires for the next ring
+        self.frozen_core_radius = outer_R
+        self.wire_defs.clear()
+        self._refresh_list()
+
+        # Reset last solution (you must define the next wires and optimize again)
+        self._last_coords = None
+        self._last_radii = None
+        self._last_R = None
+        self._last_colors = None
+        self.add_shield_btn.setEnabled(False)
+
+        # Update plot to show layers (no current solution yet)
+        self.plot_widget.set_layers(self.layers, self.frozen_core_radius)
+        self.plot_widget.update_scene(np.empty((0, 2)), np.array([]), 0.0, [])
+
+    def _clear_all(self) -> None:
         """
+        Clear EVERYTHING: historical layers, frozen core, current wires,
+        and any pending optimization results.
+        """
+        self.layers.clear()
+        self.frozen_core_radius = 0.0
+        self.wire_defs.clear()
+        self._refresh_list()
+
+        # Reset any last solution and disable actions that require it
+        self._last_coords = None
+        self._last_radii = None
+        self._last_R = None
+        self._last_colors = None
+        self.add_shield_btn.setEnabled(False)
+
+        # Refresh plot to empty
+        self.plot_widget.set_layers(self.layers, self.frozen_core_radius)
+        self.plot_widget.update_scene(np.empty((0, 2)), np.array([]), 0.0, [])
+
+    @staticmethod
+    def _app_stylesheet() -> str:
+        return """
         QWidget {
             font-family: Arial, sans-serif;
             font-size: 12px;
@@ -431,12 +673,21 @@ def main() -> None:
         QPushButton:hover {
             background-color: #2f5ea8;
         }
+        QPushButton:disabled {
+            background-color: #cccccc;
+            color: #666666;
+            border: 1px solid #999999;
+        }
         QListWidget {
             border: 1px solid #bbb;
             padding: 3px;
         }
-    """
-    )
+        """
+
+
+def main() -> None:
+    app = QApplication(sys.argv)
+    app.setStyleSheet(WireBundleApp._app_stylesheet())
     window = WireBundleApp()
     window.show()
     sys.exit(app.exec())
