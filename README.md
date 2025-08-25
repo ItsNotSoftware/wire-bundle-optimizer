@@ -10,7 +10,7 @@ It supports multi-start optimization, shielding layers, and live plotting.
 1. [Features](#features)
 2. [Installation & Run](#installation--run)
 3. [UI Walkthrough](#ui-walkthrough)
-4. [Predefined Sizes (`wire_typesyaml`)](#predefined-sizes-wire_typesyaml)
+4. [Predefined Sizes (`wire_types.yaml`)](#predefined-sizes-wire_typesyaml)
 5. [How it Works (Math)](#how-it-works-math)
 6. [Tips & Troubleshooting](#tips--troubleshooting)
 7. [Screenshots](#screenshots)
