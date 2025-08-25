@@ -48,6 +48,8 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QFrame,
     QListWidgetItem,
+    QScrollArea,
+    QSizePolicy,
 )
 from PyQt6.QtGui import QPainter, QPen, QColor, QBrush
 from PyQt6.QtCore import Qt
@@ -140,26 +142,31 @@ class WirePlotWidget(QWidget):
             inner_R = float(L["inner_R"])
             outer_R = float(L["outer_R"])
 
-            # --- Shield ring fill --
-            # Draw a filled outer disk in semi-transparent grey,
-            # then "punch" the inner disk with the window color to leave a ring.
+            # --- Shield ring: draw a true annulus (no "punching" the center) ---
+            from PyQt6.QtGui import QPainterPath
+
+            ring_path = QPainterPath()
+            # outer ellipse
+            ring_path.addEllipse(
+                int(-outer_R * scale),
+                int(-outer_R * scale),
+                int(2 * outer_R * scale),
+                int(2 * outer_R * scale),
+            )
+            # inner ellipse; OddEvenFill makes it a ring
+            ring_path.addEllipse(
+                int(-inner_R * scale),
+                int(-inner_R * scale),
+                int(2 * inner_R * scale),
+                int(2 * inner_R * scale),
+            )
+            ring_path.setFillRule(Qt.FillRule.OddEvenFill)
+
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(136, 136, 136, 90))  # soft grey
-            painter.drawEllipse(
-                int(-outer_R * scale),
-                int(-outer_R * scale),
-                int(2 * outer_R * scale),
-                int(2 * outer_R * scale),
-            )
-            painter.setBrush(self.palette().window().color())
-            painter.drawEllipse(
-                int(-inner_R * scale),
-                int(-inner_R * scale),
-                int(2 * inner_R * scale),
-                int(2 * inner_R * scale),
-            )
+            painter.drawPath(ring_path)
 
-            # Shield ring outline for clarity
+            # ring outline
             ring_pen = QPen(QColor("#888888"))
             ring_pen.setWidth(1)
             painter.setPen(ring_pen)
@@ -177,7 +184,7 @@ class WirePlotWidget(QWidget):
                 int(2 * inner_R * scale),
             )
 
-            # Draw wires of that layer
+            # Wires of that layer
             coords = L["coords"]
             radii = L["radii"]
             colors = L["colors"]
@@ -191,7 +198,7 @@ class WirePlotWidget(QWidget):
                     int(2 * r * scale),
                 )
 
-        # Draw current inner exclusion ring, if any
+        # Current inner exclusion ring
         if self.inner_exclusion_radius > 0:
             core_pen = QPen(QColor("#555555"))
             core_pen.setStyle(Qt.PenStyle.DotLine)
@@ -205,7 +212,7 @@ class WirePlotWidget(QWidget):
                 int(2 * R_in * scale),
             )
 
-        # Draw current outer boundary (dashed)
+        # Current outer boundary (dashed)
         if self.outer_radius > 0:
             outer_pen = QPen(QColor("gray"))
             outer_pen.setStyle(Qt.PenStyle.DashLine)
@@ -218,7 +225,7 @@ class WirePlotWidget(QWidget):
                 int(2 * self.outer_radius * scale),
             )
 
-        # Draw current wires
+        # Current wires
         for (x, y), r, color in zip(self.positions, self.radii, self.colors):
             painter.setPen(QPen(QColor(color)))
             painter.setBrush(QBrush(QColor(color)))
@@ -257,7 +264,16 @@ class WireBundleApp(QWidget):
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        layout = QVBoxLayout()
+        # --- outer container with a scroll area so large content can be scrolled ---
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setSpacing(0)  # tight around the scroll area
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+        content = QWidget()  # actual content widget inside the scroll area
+        layout = QVBoxLayout(content)  # original layout now belongs to 'content'
         layout.setSpacing(12)
 
         # Color palette
@@ -388,7 +404,7 @@ class WireBundleApp(QWidget):
         remove_button.setFixedHeight(28)
         remove_button.clicked.connect(self._remove_selected_wire)
 
-        clear_all_btn = QPushButton("Clear All")  # renamed from "Reset Layers"
+        clear_all_btn = QPushButton("Clear All")
         clear_all_btn.setFixedHeight(28)
         clear_all_btn.setToolTip("Clear all layers, results and defined wires.")
         clear_all_btn.clicked.connect(self._clear_all)
@@ -397,7 +413,7 @@ class WireBundleApp(QWidget):
         row_remove.addWidget(clear_all_btn)
         layout.addLayout(row_remove)
 
-        # ── Section 4: Shielding ───────────────
+        # ── Section 4: Shielding ──────────────────────────────────────────────
         shield_group = QGroupBox(
             "4. Shielding (optimize a bundle before adding shielding)"
         )
@@ -416,8 +432,7 @@ class WireBundleApp(QWidget):
         self.add_shield_btn.setToolTip(
             "Promote the current optimized bundle to a shielded core."
         )
-        # Keep disabled unless a valid optimization has just completed
-        self.add_shield_btn.setEnabled(False)
+        self.add_shield_btn.setEnabled(False)  # visually disabled via stylesheet
         self.add_shield_btn.clicked.connect(self._add_shielding)
 
         shield_form.addRow("Shield thickness (mm):", self.shield_thickness)
@@ -425,7 +440,7 @@ class WireBundleApp(QWidget):
         shield_group.setLayout(shield_form)
         layout.addWidget(shield_group)
 
-        # ── Section 5: Optimize ────────────────────────────────────────────────
+        # ── Section 5: Optimize ───────────────────────────────────────────────
         self.optimize_button = QPushButton("Optimize and Plot")
         self.optimize_button.setFixedHeight(32)
         self.optimize_button.clicked.connect(self._optimize)
@@ -437,19 +452,23 @@ class WireBundleApp(QWidget):
         sep.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(sep)
 
-        # ── Section 6: Results ─────────────────────────────────────────────────
+        # ── Section 6: Results ────────────────────────────────────────────────
         layout.addWidget(QLabel("<b>6. Results</b>"))
         self.diameter_label = QLabel("")
         layout.addWidget(self.diameter_label)
 
         self.plot_widget = WirePlotWidget()
+        self.plot_widget.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
         layout.addWidget(self.plot_widget)
 
-        # Finalize
-        self.setLayout(layout)
+        # Mount content into the scroll area and finish
+        scroll.setWidget(content)
+        outer_layout.addWidget(scroll)
+
         self.setMinimumSize(600, 640)
 
-    # ── Helpers / UI slots ────────────────────────────────────────────────────
     def _update_size_mode(self) -> None:
         is_custom = self.custom_radio.isChecked()
         self.diameter_input.setEnabled(is_custom)
