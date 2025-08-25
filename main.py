@@ -311,7 +311,7 @@ class WireBundleApp(QWidget):
         size_layout.addWidget(self.custom_radio)
 
         self.diameter_input = QDoubleSpinBox()
-        self.diameter_input.setRange(0.01, 1000.0)
+        self.diameter_input.setRange(0.001, 1000.0)
         self.diameter_input.setDecimals(3)
         self.diameter_input.setValue(1.0)
         self.diameter_input.setFixedWidth(90)
@@ -520,35 +520,25 @@ class WireBundleApp(QWidget):
             )
             self.wire_list.addItem(item)
 
-    def _undo_last_layer(self) -> None:
+    def _update_diameter_label_current(self) -> None:
         """
-        Remove the most recently added shielded layer.
-        Also remove any current (outside) wires to keep state consistent.
+        Update the diameter label using the most relevant current state:
+        - If a fresh solution exists (_last_R), show that.
+        - Else, if we have shield layers, show the last layer's outer_R.
+        - Else, clear the label.
         """
-        if not self.layers:
-            QMessageBox.information(
-                self, "Nothing to Undo", "No shield layers to remove."
+        if self._last_R is not None:
+            R = float(self._last_R)
+            self.diameter_label.setText(
+                f"Outer diameter: {(R*2):.3f} mm / {(R*2)/25.4:.3f} in"
             )
-            return
-
-        # Pop last layer and restore frozen radius to previous outer_R (or 0)
-        self.layers.pop()
-        self.frozen_core_radius = self.layers[-1]["outer_R"] if self.layers else 0.0
-
-        # Discard any outside wires the user may have started defining
-        self.wire_defs.clear()
-        self._refresh_list()
-
-        # Reset last solution and UI controls
-        self._last_coords = None
-        self._last_radii = None
-        self._last_R = None
-        self._last_colors = None
-        self.add_shield_btn.setEnabled(False)
-
-        # Update plot
-        self.plot_widget.set_layers(self.layers, self.frozen_core_radius)
-        self.plot_widget.update_scene(np.empty((0, 2)), np.array([]), 0.0, [])
+        elif self.layers:
+            R = float(self.layers[-1]["outer_R"])
+            self.diameter_label.setText(
+                f"Outer diameter (shields): {(R*2):.3f} mm / {(R*2)/25.4:.3f} in"
+            )
+        else:
+            self.diameter_label.setText("")
 
     def _optimize(self) -> None:
         radii = [d / 2.0 for cnt, d, c, l in self.wire_defs for _ in range(cnt)]
@@ -635,6 +625,7 @@ class WireBundleApp(QWidget):
         # Update plot to show layers (no current solution yet)
         self.plot_widget.set_layers(self.layers, self.frozen_core_radius)
         self.plot_widget.update_scene(np.empty((0, 2)), np.array([]), 0.0, [])
+        self._update_diameter_label_current()
 
     def _clear_all(self) -> None:
         """
@@ -656,6 +647,7 @@ class WireBundleApp(QWidget):
         # Refresh plot to empty
         self.plot_widget.set_layers(self.layers, self.frozen_core_radius)
         self.plot_widget.update_scene(np.empty((0, 2)), np.array([]), 0.0, [])
+        self._update_diameter_label_current()
 
     @staticmethod
     def _app_stylesheet() -> str:
