@@ -134,7 +134,7 @@ Minimize the enclosing radius $R$ of a circle containing all wire disks.
 -   Outer radius $R$
 
 **Effective radii**  
-$r_i^{\mathrm{eff}} = r_i \,(1 + m)$ where $m$ is the **margin**.
+$r_i^{\mathrm{eff}} = r_i \(1 + m)$ where $m$ is the **margin**.
 
 **Constraints**
 
