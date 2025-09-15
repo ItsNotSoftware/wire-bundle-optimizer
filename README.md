@@ -1,7 +1,7 @@
 # 🚀 Wire Bundle Optimizer
 
-A Python/PyQt6 app to **pack circular wires** (with arbitrary diameters) into the **smallest possible circular bundle**.  
-It supports multi-start optimization, shielding layers, and live plotting.
+A Python app to **pack circular wires** into the **smallest possible circular bundle**.  
+It supports multi-start optimization, sleeve layers, and bundle plotting.
 
 ---
 
@@ -11,9 +11,10 @@ It supports multi-start optimization, shielding layers, and live plotting.
 2. [Installation & Run](#installation--run)
 3. [UI Walkthrough](#ui-walkthrough)
 4. [Predefined Sizes (`wire_types.yaml`)](#predefined-sizes-wire_typesyaml)
-5. [How it Works (Math)](#how-it-works-math)
-6. [Tips & Troubleshooting](#tips--troubleshooting)
-7. [Screenshots](#screenshots)
+5. [Predefined Sleeves (`sleeve_types.yaml`)](#predefined-sleeves-sleeve_typesyaml)
+6. [How it Works (Math)](#how-it-works-math)
+7. [Tips & Troubleshooting](#tips--troubleshooting)
+8. [Screenshots](#screenshots)
 
 ---
 
@@ -23,11 +24,11 @@ It supports multi-start optimization, shielding layers, and live plotting.
 -   **Color-coded** wires.
 -   **Manufacturing margin** (percentage) inflates radii to enforce spacing.
 -   **Multi-start SLSQP** with parallel runs to escape local minima.
--   **Inner exclusion** constraint from prior shields (no wire can cross a shield).
+-   **Inner exclusion** constraint from prior sleeves (no wire can cross a sleeve).
 -   Live plot:
     -   Wires placement
     -   Dashed current outer boundary
-    -   Grey shield rings
+    -   Colored sleeve rings
 
 ---
 
@@ -82,13 +83,15 @@ python main.py
     - Shows the current working set.
     - **Remove Selected Wire** or **Clear All** (clears wires, layers, and results).
 
-4. **4. Shielding**
+4. **4. Sleeving**
 
-    - Set **Shield thickness** (mm).
-    - **Add Shielding** is enabled **only after** a successful optimize.
+    - Choose **Custom** thickness or select from **Predefined Sleeves** (from `sleeve_types.yaml`).
+    - Pick a **Sleeve color**.
+    - Click **Add Sleeve** to add one ring. You can click multiple times to stack multiple sleeves.
+    - The first sleeve after an optimize locks the current wire layout as a layer; subsequent sleeves can be added without re-optimizing.
       When clicked:
 
-        - The current optimized bundle becomes a **locked layer** with a shield of the given thickness.
+        - The current optimized bundle becomes a **locked layer** with the specified sleeve thickness and color.
         - The **inner exclusion radius** is updated.
         - The working wire list is cleared for defining the **next ring**.
 
@@ -124,6 +127,21 @@ In the UI, choose **Predefined Sizes** to select one of these keys.
 
 ---
 
+## Predefined Sleeves (`sleeve_types.yaml`)
+
+Place this file next to `main.py`. It maps **labels → thickness (mm)**:
+
+```yaml
+"Copper mesh (thin)": 0.200
+"Copper mesh (heavy)": 0.500
+"PET sleeving": 0.500
+"PVC jacket": 1.000
+```
+
+In the UI, choose **Predefined Sleeves** to select one of these keys. You can also use **Custom** to enter any thickness.
+
+---
+
 ## How it Works (Math)
 
 Minimize the enclosing radius $R$ of a circle containing all wire disks.
@@ -144,7 +162,7 @@ $r_i^{\mathrm{eff}} = r_i \(1 + m)$ where $m$ is the **margin**.
 2. **Non-overlap**:  
    $\|c_i - c_j\| \ge r_i^{\mathrm{eff}} + r_j^{\mathrm{eff}}$
 
-3. **Frozen core (from shields)**:  
+3. **Frozen core (from sleeves)**:  
    $\|c_i\| \ge R_{\text{core}} + r_i^{\mathrm{eff}}$
 
 **Objective**  
@@ -154,16 +172,15 @@ Minimize $R$
 
 ## Tips & Troubleshooting
 
--   If optimization is slow, reduce **initializations** or **max iterations**.
--   If wires overlap visually, increase **margin** a bit (e.g., 1–3%).
--   **Add Shielding** stays disabled until a valid solution is available.
+-   If optimization is slow, reduce **initializations**.
+-   **Add Sleeve** enables after a valid solution or when sleeves already exist.
 -   **Clear All** resets everything (wires, layers, results, frozen core).
 
 ## Screenshots
 
 ### Main UI
 
-This is the main window where you define wires, optimization parameters, and shielding layers:
+This is the main window where you define wires, optimization parameters, and sleeve layers:
 
 ![UI Example](ui.png)
 
@@ -171,6 +188,6 @@ This is the main window where you define wires, optimization parameters, and shi
 
 ### Result
 
-After optimization and adding shielding, the layout will look like this:
+After optimization and adding sleeves, the layout will look like this:
 
 ![Result Example](result.png)

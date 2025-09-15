@@ -45,6 +45,7 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QFormLayout,
     QRadioButton,
+    QCheckBox,
     QComboBox,
     QFrame,
     QListWidgetItem,
@@ -71,6 +72,19 @@ def load_wire_types(filepath: str = "wire_types.yaml") -> dict:
             "File Not Found",
             f"Wire types file '{filepath}' not found. Please create it to use predefined sizes.",
         )
+        return {}
+
+
+def load_sleeve_types(filepath: str = "sleeve_types.yaml") -> dict:
+    """Load predefined sleeve thicknesses from a YAML file (label -> thickness mm)."""
+    try:
+        with open(filepath, "r") as f:
+            data = yaml.safe_load(f) or {}
+            if not isinstance(data, dict):
+                return {}
+            return data
+    except FileNotFoundError:
+        # No predefined sleeves available; UI will allow custom entry
         return {}
 
 
@@ -137,7 +151,7 @@ class WirePlotWidget(QWidget):
         scale = min(w, h) / (2 * (max_r))
         painter.translate(w / 2, h / 2)
 
-        # Draw historical layers (shield rings + their wires)
+        # Draw historical layers (sleeve rings + their wires)
         for L in self.layers:
             inner_R = float(L["inner_R"])
             outer_R = float(L["outer_R"])
@@ -163,11 +177,14 @@ class WirePlotWidget(QWidget):
             ring_path.setFillRule(Qt.FillRule.OddEvenFill)
 
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(136, 136, 136, 90))  # soft grey
+            ring_color = L.get("ring_color", "#888888")
+            c = QColor(ring_color)
+            c.setAlpha(90)
+            painter.setBrush(c)
             painter.drawPath(ring_path)
 
             # ring outline
-            ring_pen = QPen(QColor("#888888"))
+            ring_pen = QPen(QColor(ring_color))
             ring_pen.setWidth(1)
             painter.setPen(ring_pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -184,10 +201,10 @@ class WirePlotWidget(QWidget):
                 int(2 * inner_R * scale),
             )
 
-            # Wires of that layer
-            coords = L["coords"]
-            radii = L["radii"]
-            colors = L["colors"]
+            # Wires of that layer (optional for sleeve-only layers)
+            coords = L.get("coords", np.empty((0, 2)))
+            radii = L.get("radii", np.array([]))
+            colors = L.get("colors", [])
             for (x, y), r, col in zip(coords, radii, colors):
                 painter.setPen(QPen(QColor(col)))
                 painter.setBrush(QBrush(QColor(col)))
@@ -261,6 +278,7 @@ class WireBundleApp(QWidget):
         self._last_colors: List[str] | None = None
 
         self.predefined_types = load_wire_types()
+        self.predefined_sleeves = load_sleeve_types()
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -276,14 +294,15 @@ class WireBundleApp(QWidget):
         layout = QVBoxLayout(content)  # original layout now belongs to 'content'
         layout.setSpacing(12)
 
-        # Color palette
+        # Color palette (wires)
         self.color_palette = [
             "#007acc",
             "#cc0000",
             "#009933",
             "#ff8800",
             "#9933cc",
-            "#444444",
+            "#444444",  # dark grey
+            "#888888",  # medium grey
         ]
         self.selected_color = self.color_palette[0]
         self.color_buttons: List[QPushButton] = []
@@ -413,32 +432,75 @@ class WireBundleApp(QWidget):
         row_remove.addWidget(clear_all_btn)
         layout.addLayout(row_remove)
 
-        # ── Section 4: Shielding ──────────────────────────────────────────────
-        shield_group = QGroupBox(
-            "4. Shielding (optimize a bundle before adding shielding)"
+        # ── Section 4: Sleeving ──────────────────────────────────────────────
+        sleeve_group = QGroupBox("4. Sleeving")
+        sleeve_form = QFormLayout()
+        sleeve_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        sleeve_form.setHorizontalSpacing(20)
+        sleeve_form.setVerticalSpacing(8)
+
+        # Sleeve thickness: Custom vs Predefined
+        sleeve_size_layout = QHBoxLayout()
+        self.sleeve_custom_radio = QRadioButton("Custom")
+        self.sleeve_custom_radio.toggled.connect(self._update_sleeve_size_mode)
+        sleeve_size_layout.addWidget(self.sleeve_custom_radio)
+
+        self.sleeve_thickness = QDoubleSpinBox()
+        self.sleeve_thickness.setRange(0.01, 10000.0)
+        self.sleeve_thickness.setDecimals(3)
+        self.sleeve_thickness.setValue(0.1)
+        self.sleeve_thickness.setFixedWidth(100)
+        sleeve_size_layout.addWidget(self.sleeve_thickness)
+
+        sleeve_size_layout.addSpacing(20)
+
+        self.sleeve_predef_radio = QRadioButton("Predefined Sleeves")
+        self.sleeve_predef_radio.toggled.connect(self._update_sleeve_size_mode)
+        sleeve_size_layout.addWidget(self.sleeve_predef_radio)
+
+        self.sleeve_predef_selector = QComboBox()
+        self.sleeve_predef_selector.addItems(list(self.predefined_sleeves.keys()))
+        self.sleeve_predef_selector.setEnabled(False)
+        sleeve_size_layout.addWidget(self.sleeve_predef_selector)
+
+        sleeve_form.addRow("Sleeve thickness (mm):", sleeve_size_layout)
+        self.sleeve_custom_radio.setChecked(True)
+
+        # Sleeve color picker
+        self.sleeve_color_palette = [
+            "#007acc",
+            "#cc0000",
+            "#009933",
+            "#ff8800",
+            "#9933cc",
+            "#444444",  # dark grey
+            "#888888",  # medium grey
+        ]
+        self.selected_sleeve_color = self.sleeve_color_palette[-1]
+        self.sleeve_color_buttons: List[QPushButton] = []
+        sleeve_color_layout = QHBoxLayout()
+        for color in self.sleeve_color_palette:
+            btn = QPushButton()
+            btn.setFixedSize(20, 20)
+            btn.setStyleSheet(
+                self._color_button_style(color, selected=(color == self.selected_sleeve_color))
+            )
+            btn.clicked.connect(lambda _, c=color: self._set_sleeve_color(c))
+            self.sleeve_color_buttons.append(btn)
+            sleeve_color_layout.addWidget(btn)
+        sleeve_form.addRow("Sleeve color:", sleeve_color_layout)
+
+        # Add Sleeve button
+        self.add_sleeve_btn = QPushButton("Add Sleeve")
+        self.add_sleeve_btn.setToolTip(
+            "Add one sleeve ring around the current core. You can add multiple sleeves in sequence."
         )
-        shield_form = QFormLayout()
-        shield_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        shield_form.setHorizontalSpacing(20)
-        shield_form.setVerticalSpacing(8)
+        self.add_sleeve_btn.setEnabled(False)
+        self.add_sleeve_btn.clicked.connect(self._add_sleeve)
+        sleeve_form.addRow("", self.add_sleeve_btn)
 
-        self.shield_thickness = QDoubleSpinBox()
-        self.shield_thickness.setRange(0.01, 10000.0)
-        self.shield_thickness.setDecimals(3)
-        self.shield_thickness.setValue(0.1)
-        self.shield_thickness.setFixedWidth(100)
-
-        self.add_shield_btn = QPushButton("Add Shielding")
-        self.add_shield_btn.setToolTip(
-            "Promote the current optimized bundle to a shielded core."
-        )
-        self.add_shield_btn.setEnabled(False)  # visually disabled via stylesheet
-        self.add_shield_btn.clicked.connect(self._add_shielding)
-
-        shield_form.addRow("Shield thickness (mm):", self.shield_thickness)
-        shield_form.addRow("", self.add_shield_btn)
-        shield_group.setLayout(shield_form)
-        layout.addWidget(shield_group)
+        sleeve_group.setLayout(sleeve_form)
+        layout.addWidget(sleeve_group)
 
         # ── Section 5: Optimize ───────────────────────────────────────────────
         self.optimize_button = QPushButton("Optimize and Plot")
@@ -474,6 +536,11 @@ class WireBundleApp(QWidget):
         self.diameter_input.setEnabled(is_custom)
         self.predef_selector.setEnabled(not is_custom)
 
+    def _update_sleeve_size_mode(self) -> None:
+        is_custom = self.sleeve_custom_radio.isChecked()
+        self.sleeve_thickness.setEnabled(is_custom)
+        self.sleeve_predef_selector.setEnabled(not is_custom)
+
     def _color_button_style(self, color: str, selected: bool = False) -> str:
         border = "2px solid black" if selected else "1px solid #444"
         return f"background-color: {color}; border: {border}; border-radius: 10px;"
@@ -482,6 +549,12 @@ class WireBundleApp(QWidget):
         self.selected_color = color
         for btn, col in zip(self.color_buttons, self.color_palette):
             is_selected = col == self.selected_color
+            btn.setStyleSheet(self._color_button_style(col, is_selected))
+
+    def _set_sleeve_color(self, color: str) -> None:
+        self.selected_sleeve_color = color
+        for btn, col in zip(self.sleeve_color_buttons, self.sleeve_color_palette):
+            is_selected = col == self.selected_sleeve_color
             btn.setStyleSheet(self._color_button_style(col, is_selected))
 
     def _add_wire(self) -> None:
@@ -524,7 +597,7 @@ class WireBundleApp(QWidget):
         """
         Update the diameter label using the most relevant current state:
         - If a fresh solution exists (_last_R), show that.
-        - Else, if we have shield layers, show the last layer's outer_R.
+        - Else, if we have sleeve layers, show the last layer's outer_R.
         - Else, clear the label.
         """
         if self._last_R is not None:
@@ -535,7 +608,7 @@ class WireBundleApp(QWidget):
         elif self.layers:
             R = float(self.layers[-1]["outer_R"])
             self.diameter_label.setText(
-                f"Outer diameter (shields): {(R*2):.3f} mm / {(R*2)/25.4:.3f} in"
+                f"Outer diameter (sleeves): {(R*2):.3f} mm / {(R*2)/25.4:.3f} in"
             )
         else:
             self.diameter_label.setText("")
@@ -573,59 +646,92 @@ class WireBundleApp(QWidget):
             f"Outer diameter: {(R*2):.3f} mm / {(R*2)/25.4:.3f} in"
         )
 
-        # Allow adding a shield layer based on this result
-        self.add_shield_btn.setEnabled(True)
+        # Allow adding sleeves: either fresh solution or existing layers allow it
+        if hasattr(self, "add_sleeve_btn"):
+            self._update_add_sleeve_button()
 
-    def _add_shielding(self) -> None:
-        """Promote the current optimized bundle to a shielded layer and clear wires."""
-        if (
-            self._last_coords is None
-            or self._last_radii is None
-            or self._last_R is None
-            or self._last_colors is None
-        ):
-            QMessageBox.information(
-                self, "No Solution", "Optimize first, then add shielding."
-            )
-            return
+    def _update_add_sleeve_button(self) -> None:
+        can_add = (self._last_R is not None) or (self.frozen_core_radius > 0.0)
+        self.add_sleeve_btn.setEnabled(bool(can_add))
 
-        thickness = self.shield_thickness.value()
+    def _add_sleeve(self) -> None:
+        """
+        Add a single sleeve ring. If a fresh optimization result is available,
+        the ring will wrap that solution and lock it as a layer. Otherwise, the
+        ring will be added on top of the existing frozen core.
+        """
+        # Determine thickness from UI
+        if self.sleeve_custom_radio.isChecked():
+            thickness = float(self.sleeve_thickness.value())
+            sleeve_label = f"Custom {thickness:.3f} mm"
+        else:
+            sleeve_label = self.sleeve_predef_selector.currentText()
+            try:
+                thickness = float(self.predefined_sleeves[sleeve_label])
+            except Exception:
+                QMessageBox.warning(self, "Invalid Selection", "Invalid predefined sleeve.")
+                return
         if thickness <= 0:
-            QMessageBox.warning(
-                self, "Invalid Thickness", "Please set a positive shield thickness."
-            )
+            QMessageBox.warning(self, "Invalid Thickness", "Please set a positive sleeve thickness.")
             return
 
-        inner_R = float(self._last_R)
-        outer_R = inner_R + thickness
+        ring_color = self.selected_sleeve_color
 
-        # Save the solved layer
-        self.layers.append(
-            {
-                "coords": np.array(self._last_coords, dtype=float).copy(),
-                "radii": np.array(self._last_radii, dtype=float).copy(),
-                "colors": list(self._last_colors),
-                "inner_R": inner_R,
-                "outer_R": outer_R,
-            }
-        )
+        # Decide inner radius
+        if self._last_R is not None:
+            inner_R = float(self._last_R)
+            # Save layer with wires
+            outer_R = inner_R + thickness
+            self.layers.append(
+                {
+                    "coords": np.array(self._last_coords, dtype=float).copy(),
+                    "radii": np.array(self._last_radii, dtype=float).copy(),
+                    "colors": list(self._last_colors),
+                    "inner_R": inner_R,
+                    "outer_R": outer_R,
+                    "ring_color": ring_color,
+                    "sleeve_label": sleeve_label,
+                }
+            )
 
-        # Freeze this core for next runs and clear current wires for the next ring
-        self.frozen_core_radius = outer_R
-        self.wire_defs.clear()
-        self._refresh_list()
+            # Clear last solution and working wires (prepare for next ring)
+            self.frozen_core_radius = outer_R
+            self.wire_defs.clear()
+            self._refresh_list()
 
-        # Reset last solution (you must define the next wires and optimize again)
-        self._last_coords = None
-        self._last_radii = None
-        self._last_R = None
-        self._last_colors = None
-        self.add_shield_btn.setEnabled(False)
+            self._last_coords = None
+            self._last_radii = None
+            self._last_R = None
+            self._last_colors = None
+        elif self.frozen_core_radius > 0.0:
+            inner_R = float(self.frozen_core_radius)
+            outer_R = inner_R + thickness
+            # Sleeve-only layer
+            self.layers.append(
+                {
+                    "coords": np.empty((0, 2)),
+                    "radii": np.array([]),
+                    "colors": [],
+                    "inner_R": inner_R,
+                    "outer_R": outer_R,
+                    "ring_color": ring_color,
+                    "sleeve_label": sleeve_label,
+                }
+            )
+            self.frozen_core_radius = outer_R
+        else:
+            QMessageBox.information(
+                self,
+                "No Core",
+                "Optimize first to create a core before adding sleeves.",
+            )
+            return
 
         # Update plot to show layers (no current solution yet)
         self.plot_widget.set_layers(self.layers, self.frozen_core_radius)
         self.plot_widget.update_scene(np.empty((0, 2)), np.array([]), 0.0, [])
         self._update_diameter_label_current()
+        self._update_add_sleeve_button()
 
     def _clear_all(self) -> None:
         """
@@ -642,7 +748,7 @@ class WireBundleApp(QWidget):
         self._last_radii = None
         self._last_R = None
         self._last_colors = None
-        self.add_shield_btn.setEnabled(False)
+        self._update_add_sleeve_button()
 
         # Refresh plot to empty
         self.plot_widget.set_layers(self.layers, self.frozen_core_radius)
