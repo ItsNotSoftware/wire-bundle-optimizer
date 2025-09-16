@@ -296,11 +296,13 @@ class WireBundleApp(QWidget):
 
         # Color palette (wires)
         self.color_palette = [
-            "#007acc",
-            "#cc0000",
-            "#009933",
-            "#ff8800",
-            "#9933cc",
+            "#007acc",  # blue
+            "#cc0000",  # red
+            "#009933",  # green
+            "#ff8800",  # orange
+            "#9933cc",  # purple
+            "#a5722a",  # brown
+            "#ffffff",  # white
             "#444444",  # dark grey
             "#888888",  # medium grey
         ]
@@ -466,16 +468,8 @@ class WireBundleApp(QWidget):
         sleeve_form.addRow("Sleeve thickness (mm):", sleeve_size_layout)
         self.sleeve_custom_radio.setChecked(True)
 
-        # Sleeve color picker
-        self.sleeve_color_palette = [
-            "#007acc",
-            "#cc0000",
-            "#009933",
-            "#ff8800",
-            "#9933cc",
-            "#444444",  # dark grey
-            "#888888",  # medium grey
-        ]
+        # Sleeve color picker — reuse same palette as wires
+        self.sleeve_color_palette = self.color_palette
         self.selected_sleeve_color = self.sleeve_color_palette[-1]
         self.sleeve_color_buttons: List[QPushButton] = []
         sleeve_color_layout = QHBoxLayout()
@@ -483,7 +477,9 @@ class WireBundleApp(QWidget):
             btn = QPushButton()
             btn.setFixedSize(20, 20)
             btn.setStyleSheet(
-                self._color_button_style(color, selected=(color == self.selected_sleeve_color))
+                self._color_button_style(
+                    color, selected=(color == self.selected_sleeve_color)
+                )
             )
             btn.clicked.connect(lambda _, c=color: self._set_sleeve_color(c))
             self.sleeve_color_buttons.append(btn)
@@ -669,10 +665,14 @@ class WireBundleApp(QWidget):
             try:
                 thickness = float(self.predefined_sleeves[sleeve_label])
             except Exception:
-                QMessageBox.warning(self, "Invalid Selection", "Invalid predefined sleeve.")
+                QMessageBox.warning(
+                    self, "Invalid Selection", "Invalid predefined sleeve."
+                )
                 return
         if thickness <= 0:
-            QMessageBox.warning(self, "Invalid Thickness", "Please set a positive sleeve thickness.")
+            QMessageBox.warning(
+                self, "Invalid Thickness", "Please set a positive sleeve thickness."
+            )
             return
 
         ring_color = self.selected_sleeve_color
