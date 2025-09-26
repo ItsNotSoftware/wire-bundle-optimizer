@@ -7,6 +7,7 @@ Copyright (c) 2025 Diogo Ferreira
 from __future__ import annotations
 import numpy as np
 from scipy.optimize import minimize
+from typing import Callable
 
 
 class WireBundleOptimizer:
@@ -214,7 +215,10 @@ class WireBundleOptimizer:
         return coords, R, bool(res.success)
 
     def solve_multi(
-        self, n_initializations: int, max_iterations: int = 200
+        self,
+        n_initializations: int,
+        max_iterations: int = 200,
+        progress_cb: Callable[[int, int], None] | None = None,
     ) -> tuple[np.ndarray, np.ndarray, float]:
         """
         Run multiple optimizations from varied initial guesses (spiral + random).
@@ -250,7 +254,12 @@ class WireBundleOptimizer:
                 x0_rand = np.concatenate([coords_rand.flatten(), [R0]])
                 initial_guesses.append(x0_rand)
 
-        results = [self.solve(x0, max_iterations) for x0 in initial_guesses]
+        results: list[tuple[np.ndarray, float, bool]] = []
+        total = len(initial_guesses)
+        for idx, x0 in enumerate(initial_guesses, start=1):
+            results.append(self.solve(x0, max_iterations))
+            if progress_cb is not None:
+                progress_cb(idx, total)
 
         best_radius = np.inf
         best_coords = None

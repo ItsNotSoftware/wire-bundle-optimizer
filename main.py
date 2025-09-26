@@ -50,6 +50,7 @@ from PyQt6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QHeaderView,
+    QProgressBar,
 )
 from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QKeySequence, QShortcut
 from PyQt6.QtCore import Qt
@@ -391,7 +392,7 @@ class WireBundleApp(QWidget):
 
         row1_layout.addWidget(QLabel("Max Solver Iterations:"))
         self.max_iter_input = QSpinBox()
-        self.max_iter_input.setRange(1, 999999)
+        self.max_iter_input.setRange(1, 9999999)
         self.max_iter_input.setValue(10000)
         self.max_iter_input.setFixedWidth(70)
         row1_layout.addWidget(self.max_iter_input)
@@ -522,7 +523,9 @@ class WireBundleApp(QWidget):
 
         # ── Section 5: Optimize ───────────────────────────────────────────────
         self.optimize_button = QPushButton("Optimize and Plot")
-        self.optimize_button.setToolTip("Run the solver to arrange the defined wires in the smallest bundle.")
+        self.optimize_button.setToolTip(
+            "Run the solver to arrange the defined wires in the smallest bundle."
+        )
         self.optimize_button.setFixedHeight(32)
         self.optimize_button.setEnabled(False)
         self.optimize_button.clicked.connect(self._optimize)
@@ -580,6 +583,12 @@ class WireBundleApp(QWidget):
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         results_layout.addWidget(self.layer_table)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("Optimizing…")
+        results_layout.addWidget(self.progress_bar)
 
         self.status_label = QLabel("Ready.")
         self.status_label.setStyleSheet("color: #555555;")
@@ -653,9 +662,7 @@ class WireBundleApp(QWidget):
 
         self.wire_defs.append((count, diameter, color, label))
         self._refresh_list()
-        self._set_status(
-            f"Added {count} wire{'s' if count != 1 else ''} of {label}."
-        )
+        self._set_status(f"Added {count} wire{'s' if count != 1 else ''} of {label}.")
 
     def _remove_selected_wire(self) -> None:
         row = self.wire_list.currentRow()
@@ -686,9 +693,11 @@ class WireBundleApp(QWidget):
                 f"{total_wires} {wire_text} across {unique_groups} {group_text}."
             )
         else:
-            self.wire_summary_label.setText("No wires added yet. Use section 1 to add them.")
+            self.wire_summary_label.setText(
+                "No wires added yet. Use section 1 to add them."
+            )
 
-        if hasattr(self, 'optimize_button'):
+        if hasattr(self, "optimize_button"):
             self.optimize_button.setEnabled(bool(self.wire_defs))
 
     def _update_diameter_label_current(self) -> None:
@@ -715,7 +724,9 @@ class WireBundleApp(QWidget):
         radii = [d / 2.0 for cnt, d, c, l in self.wire_defs for _ in range(cnt)]
         colors = [c for cnt, d, c, l in self.wire_defs for _ in range(cnt)]
         if not radii:
-            QMessageBox.warning(self, "Input Error", "Add at least one wire before optimizing.")
+            QMessageBox.warning(
+                self, "Input Error", "Add at least one wire before optimizing."
+            )
             self._set_status("Add wires to run the optimizer.")
             return
 
@@ -731,12 +742,27 @@ class WireBundleApp(QWidget):
         self.optimize_button.setEnabled(False)
         self._set_status("Running optimization...")
         QApplication.processEvents()
+        total_runs = max(1, self.inits_input.value())
+        self.progress_bar.setRange(0, total_runs)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat(f"Optimization progress: 0/{total_runs}")
+        self.progress_bar.setVisible(True)
+        self.progress_bar.repaint()
+        QApplication.processEvents()
+
+        def on_progress(done: int, total: int) -> None:
+            self.progress_bar.setRange(0, total)
+            self.progress_bar.setValue(done)
+            self.progress_bar.setFormat(f"Optimization progress: {done}/{total}")
+            QApplication.processEvents()
+
         start = perf_counter()
 
         try:
             coords, radii_arr, R = optimizer.solve_multi(
                 n_initializations=self.inits_input.value(),
                 max_iterations=self.max_iter_input.value(),
+                progress_cb=on_progress,
             )
         except Exception as exc:
             QMessageBox.critical(
@@ -750,6 +776,7 @@ class WireBundleApp(QWidget):
             QApplication.restoreOverrideCursor()
             self.optimize_button.setText(original_text)
             self.optimize_button.setEnabled(bool(self.wire_defs))
+            self.progress_bar.setVisible(False)
 
         elapsed = perf_counter() - start
         if coords is None or not np.isfinite(R):
@@ -758,7 +785,9 @@ class WireBundleApp(QWidget):
                 "No Feasible Solution",
                 "The solver could not find a feasible wire arrangement.",
             )
-            self._set_status("Solver finished without a feasible layout. Adjust inputs and try again.")
+            self._set_status(
+                "Solver finished without a feasible layout. Adjust inputs and try again."
+            )
             return
 
         self._last_coords = coords
