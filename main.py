@@ -25,6 +25,7 @@ from __future__ import annotations
 import sys
 import yaml
 import numpy as np
+from time import perf_counter
 from typing import List, Dict, Any
 
 from PyQt6.QtWidgets import (
@@ -414,7 +415,14 @@ class WireBundleApp(QWidget):
         layout.addWidget(opt_group)
 
         # ── Section 3: Defined Wires ──────────────────────────────────────────
-        layout.addWidget(QLabel("3. Defined Wires"))
+        section_label = QLabel("3. Defined Wires")
+        section_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(section_label)
+        self.wire_summary_label = QLabel("No wires added yet.")
+        self.wire_summary_label.setStyleSheet("color: #555555;")
+        self.wire_summary_label.setWordWrap(True)
+        layout.addWidget(self.wire_summary_label)
+
         self.wire_list = QListWidget()
         self.wire_list.setFixedHeight(90)
         layout.addWidget(self.wire_list)
@@ -514,7 +522,9 @@ class WireBundleApp(QWidget):
 
         # ── Section 5: Optimize ───────────────────────────────────────────────
         self.optimize_button = QPushButton("Optimize and Plot")
+        self.optimize_button.setToolTip("Run the solver to arrange the defined wires in the smallest bundle.")
         self.optimize_button.setFixedHeight(32)
+        self.optimize_button.setEnabled(False)
         self.optimize_button.clicked.connect(self._optimize)
         layout.addWidget(self.optimize_button)
 
@@ -633,28 +643,53 @@ class WireBundleApp(QWidget):
         # Merge with existing identical wires (same diameter & color)
         for i, (cnt, dia, col, lbl) in enumerate(self.wire_defs):
             if abs(dia - diameter) < 1e-9 and col == color:
-                self.wire_defs[i] = (cnt + count, diameter, color, label)
+                new_total = cnt + count
+                self.wire_defs[i] = (new_total, diameter, color, label)
                 self._refresh_list()
+                self._set_status(
+                    f"Updated {label}: {new_total} wire{'s' if new_total != 1 else ''} in this group."
+                )
                 return
 
         self.wire_defs.append((count, diameter, color, label))
         self._refresh_list()
+        self._set_status(
+            f"Added {count} wire{'s' if count != 1 else ''} of {label}."
+        )
 
     def _remove_selected_wire(self) -> None:
         row = self.wire_list.currentRow()
         if row >= 0:
-            del self.wire_defs[row]
+            count, diameter, color, label = self.wire_defs.pop(row)
             self._refresh_list()
+            self._set_status(
+                f"Removed {count} wire{'s' if count != 1 else ''} of {label}."
+            )
 
     def _refresh_list(self) -> None:
         self.wire_list.clear()
+        total_wires = 0
         for cnt, dia, color, label in self.wire_defs:
+            total_wires += cnt
             item = QListWidgetItem(f"{cnt} x {label}")
             item.setBackground(QColor(color))
             item.setForeground(
                 QColor("white") if QColor(color).lightness() < 128 else QColor("black")
             )
             self.wire_list.addItem(item)
+
+        if self.wire_defs:
+            unique_groups = len(self.wire_defs)
+            group_text = "group" if unique_groups == 1 else "groups"
+            wire_text = "wire" if total_wires == 1 else "wires"
+            self.wire_summary_label.setText(
+                f"{total_wires} {wire_text} across {unique_groups} {group_text}."
+            )
+        else:
+            self.wire_summary_label.setText("No wires added yet. Use section 1 to add them.")
+
+        if hasattr(self, 'optimize_button'):
+            self.optimize_button.setEnabled(bool(self.wire_defs))
 
     def _update_diameter_label_current(self) -> None:
         """
@@ -680,7 +715,8 @@ class WireBundleApp(QWidget):
         radii = [d / 2.0 for cnt, d, c, l in self.wire_defs for _ in range(cnt)]
         colors = [c for cnt, d, c, l in self.wire_defs for _ in range(cnt)]
         if not radii:
-            QMessageBox.warning(self, "Input Error", "No wires defined.")
+            QMessageBox.warning(self, "Input Error", "Add at least one wire before optimizing.")
+            self._set_status("Add wires to run the optimizer.")
             return
 
         optimizer = WireBundleOptimizer(
@@ -689,10 +725,41 @@ class WireBundleApp(QWidget):
             inner_exclusion_radius=self.frozen_core_radius,
         )
 
-        coords, radii_arr, R = optimizer.solve_multi(
-            n_initializations=self.inits_input.value(),
-            max_iterations=self.max_iter_input.value(),
-        )
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        original_text = self.optimize_button.text()
+        self.optimize_button.setText("Optimizing...")
+        self.optimize_button.setEnabled(False)
+        self._set_status("Running optimization...")
+        QApplication.processEvents()
+        start = perf_counter()
+
+        try:
+            coords, radii_arr, R = optimizer.solve_multi(
+                n_initializations=self.inits_input.value(),
+                max_iterations=self.max_iter_input.value(),
+            )
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Solver Error",
+                f"Optimization failed with an unexpected error: \n\n{exc}",
+            )
+            self._set_status("Optimization failed. See error message.")
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+            self.optimize_button.setText(original_text)
+            self.optimize_button.setEnabled(bool(self.wire_defs))
+
+        elapsed = perf_counter() - start
+        if coords is None or not np.isfinite(R):
+            QMessageBox.warning(
+                self,
+                "No Feasible Solution",
+                "The solver could not find a feasible wire arrangement.",
+            )
+            self._set_status("Solver finished without a feasible layout. Adjust inputs and try again.")
+            return
 
         self._last_coords = coords
         self._last_radii = radii_arr
@@ -715,7 +782,7 @@ class WireBundleApp(QWidget):
 
         self._update_layer_summary()
         self._set_status(
-            f"Optimization complete: {len(radii)} wires, outer Ø {(R * 2):.3f} mm."
+            f"Optimization complete in {elapsed:.2f} s: {len(radii_arr)} wire{'s' if len(radii_arr) != 1 else ''}, outer Ø {(R * 2):.3f} mm."
         )
 
     def _update_add_sleeve_button(self) -> None:
