@@ -22,10 +22,6 @@ SOFTWARE.
 
 from __future__ import annotations
 
-from joblib import parallel_backend
-
-parallel_backend("threading")  # Fixes a Windows devices bug for joblib
-
 import sys
 import yaml
 import numpy as np
@@ -45,7 +41,6 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QFormLayout,
     QRadioButton,
-    QCheckBox,
     QComboBox,
     QFrame,
     QListWidgetItem,
@@ -389,14 +384,14 @@ class WireBundleApp(QWidget):
         )
         self.inits_input = QSpinBox()
         self.inits_input.setRange(1, 1000)
-        self.inits_input.setValue(8)
+        self.inits_input.setValue(4)
         self.inits_input.setFixedWidth(70)
         row1_layout.addWidget(self.inits_input)
 
         row1_layout.addWidget(QLabel("Max Solver Iterations:"))
         self.max_iter_input = QSpinBox()
-        self.max_iter_input.setRange(1, 10000)
-        self.max_iter_input.setValue(2000)
+        self.max_iter_input.setRange(1, 999999)
+        self.max_iter_input.setValue(10000)
         self.max_iter_input.setFixedWidth(70)
         row1_layout.addWidget(self.max_iter_input)
         opt_main_layout.addLayout(row1_layout)
@@ -697,7 +692,6 @@ class WireBundleApp(QWidget):
         coords, radii_arr, R = optimizer.solve_multi(
             n_initializations=self.inits_input.value(),
             max_iterations=self.max_iter_input.value(),
-            n_jobs=-1,
         )
 
         self._last_coords = coords
@@ -741,9 +735,7 @@ class WireBundleApp(QWidget):
 
         if total_layers:
             outer_R = float(self.layers[-1].get("outer_R", 0.0))
-            self.bundle_outer_label.setText(
-                f"Bundle outer Ø: {(outer_R * 2.0):.3f} mm"
-            )
+            self.bundle_outer_label.setText(f"Bundle outer Ø: {(outer_R * 2.0):.3f} mm")
         else:
             self.bundle_outer_label.setText("Bundle outer Ø: —")
 
@@ -774,7 +766,9 @@ class WireBundleApp(QWidget):
                 item = QTableWidgetItem(value)
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 if col == 1:
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                    item.setTextAlignment(
+                        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                    )
                 self.layer_table.setItem(row, col, item)
 
         if total_layers == 0:

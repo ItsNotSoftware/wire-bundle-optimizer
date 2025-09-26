@@ -49,7 +49,7 @@ This automatically manages a virtual environment and dependencies.
 First install dependencies:
 
 ```bash
-pip install PyQt6 numpy scipy joblib pyyaml
+pip install PyQt6 numpy scipy pyyaml
 ```
 
 Then run:
