@@ -51,6 +51,9 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QScrollArea,
     QSizePolicy,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
 )
 from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QKeySequence, QShortcut
 from PyQt6.QtCore import Qt
@@ -527,9 +530,58 @@ class WireBundleApp(QWidget):
         layout.addWidget(sep)
 
         # ── Section 6: Results ────────────────────────────────────────────────
-        layout.addWidget(QLabel("<b>6. Results</b>"))
+        results_group = QGroupBox("6. Results & Status")
+        results_layout = QVBoxLayout()
+
         self.diameter_label = QLabel("")
-        layout.addWidget(self.diameter_label)
+        self.diameter_label.setStyleSheet("font-weight: bold;")
+        results_layout.addWidget(self.diameter_label)
+
+        summary_row = QHBoxLayout()
+        summary_row.setSpacing(16)
+        self.total_layers_label = QLabel("Layers: 0")
+        self.bundle_outer_label = QLabel("Bundle outer Ø: —")
+        summary_row.addWidget(self.total_layers_label)
+        summary_row.addWidget(self.bundle_outer_label)
+        summary_row.addStretch(1)
+        results_layout.addLayout(summary_row)
+
+        self.layer_table = QTableWidget(0, 5)
+        self.layer_table.setHorizontalHeaderLabels(
+            [
+                "#",
+                "Description",
+                "Inner Ø (mm / in)",
+                "Outer Ø (mm / in)",
+                "Thickness (mm / in)",
+            ]
+        )
+        self.layer_table.verticalHeader().setVisible(False)
+        self.layer_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.layer_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self.layer_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.layer_table.setAlternatingRowColors(True)
+        self.layer_table.setShowGrid(False)
+        self.layer_table.setStyleSheet(
+            "QTableWidget::item { padding: 4px; } "
+            "QHeaderView::section { background-color: #f0f4ff; border: none; padding: 6px; font-weight: bold; }"
+        )
+        self.layer_table.setFixedHeight(180)
+        header = self.layer_table.horizontalHeader()
+        header.setStretchLastSection(True)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        results_layout.addWidget(self.layer_table)
+
+        self.status_label = QLabel("Ready.")
+        self.status_label.setStyleSheet("color: #555555;")
+        results_layout.addWidget(self.status_label)
+
+        results_group.setLayout(results_layout)
+        layout.addWidget(results_group)
 
         self.plot_widget = WirePlotWidget()
         self.plot_widget.setSizePolicy(
@@ -544,7 +596,8 @@ class WireBundleApp(QWidget):
         scroll.setWidget(content)
         outer_layout.addWidget(scroll)
 
-        self.setMinimumSize(600, 640)
+        self.setMinimumSize(640, 680)
+        self._update_layer_summary()
 
     def _update_size_mode(self) -> None:
         is_custom = self.custom_radio.isChecked()
@@ -666,6 +719,11 @@ class WireBundleApp(QWidget):
             self._update_add_sleeve_button()
             self._update_undo_button()
 
+        self._update_layer_summary()
+        self._set_status(
+            f"Optimization complete: {len(radii)} wires, outer Ø {(R * 2):.3f} mm."
+        )
+
     def _update_add_sleeve_button(self) -> None:
         can_add = (self._last_R is not None) or (self.frozen_core_radius > 0.0)
         self.add_sleeve_btn.setEnabled(bool(can_add))
@@ -673,6 +731,60 @@ class WireBundleApp(QWidget):
     def _update_undo_button(self) -> None:
         if hasattr(self, "undo_layer_btn"):
             self.undo_layer_btn.setEnabled(bool(self.layers))
+
+    def _update_layer_summary(self) -> None:
+        if not hasattr(self, "layer_table"):
+            return
+
+        total_layers = len(self.layers)
+        self.total_layers_label.setText(f"Layers: {total_layers}")
+
+        if total_layers:
+            outer_R = float(self.layers[-1].get("outer_R", 0.0))
+            self.bundle_outer_label.setText(
+                f"Bundle outer Ø: {(outer_R * 2.0):.3f} mm"
+            )
+        else:
+            self.bundle_outer_label.setText("Bundle outer Ø: —")
+
+        self.layer_table.setRowCount(total_layers)
+        for row, layer in enumerate(self.layers):
+            inner_R = float(layer.get("inner_R", 0.0))
+            outer_R = float(layer.get("outer_R", 0.0))
+            thickness = max(outer_R - inner_R, 0.0)
+            descriptor = layer.get("sleeve_label") or "Layer"
+
+            inner_mm = inner_R * 2.0
+            outer_mm = outer_R * 2.0
+            thickness_mm = thickness
+
+            inner_in = inner_mm / 25.4
+            outer_in = outer_mm / 25.4
+            thickness_in = thickness_mm / 25.4
+
+            values = [
+                str(row + 1),
+                descriptor,
+                f"{inner_mm:.3f} mm / {inner_in:.3f} in",
+                f"{outer_mm:.3f} mm / {outer_in:.3f} in",
+                f"{thickness_mm:.3f} mm / {thickness_in:.3f} in",
+            ]
+
+            for col, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                if col == 1:
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                self.layer_table.setItem(row, col, item)
+
+        if total_layers == 0:
+            self.layer_table.clearContents()
+
+        self.layer_table.setVisible(total_layers > 0)
+
+    def _set_status(self, message: str) -> None:
+        if hasattr(self, "status_label"):
+            self.status_label.setText(message)
 
     def _add_sleeve(self) -> None:
         """
@@ -759,6 +871,10 @@ class WireBundleApp(QWidget):
         self._update_diameter_label_current()
         self._update_add_sleeve_button()
         self._update_undo_button()
+        self._update_layer_summary()
+        self._set_status(
+            f"Added layer '{sleeve_label}' (thickness {thickness:.3f} mm)."
+        )
 
     def _undo_last_layer(self) -> None:
         """Remove the most recently added layer and restore prior state."""
@@ -801,9 +917,12 @@ class WireBundleApp(QWidget):
             self._last_colors = None
             self.plot_widget.update_scene(np.empty((0, 2)), np.array([]), 0.0, [])
 
+        descriptor = removed_layer.get("sleeve_label") or "layer"
         self._update_diameter_label_current()
         self._update_add_sleeve_button()
         self._update_undo_button()
+        self._update_layer_summary()
+        self._set_status(f"Undo: removed {descriptor}.")
 
     def _clear_all(self) -> None:
         """
@@ -822,6 +941,8 @@ class WireBundleApp(QWidget):
         self._last_colors = None
         self._update_add_sleeve_button()
         self._update_undo_button()
+        self._update_layer_summary()
+        self._set_status("Cleared all layers and wires.")
 
         # Refresh plot to empty
         self.plot_widget.set_layers(self.layers, self.frozen_core_radius)
