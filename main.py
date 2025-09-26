@@ -52,7 +52,7 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
 )
-from PyQt6.QtGui import QPainter, QPen, QColor, QBrush
+from PyQt6.QtGui import QPainter, QPen, QColor, QBrush, QKeySequence, QShortcut
 from PyQt6.QtCore import Qt
 
 from optimizer import WireBundleOptimizer
@@ -299,6 +299,7 @@ class WireBundleApp(QWidget):
             "#007acc",  # blue
             "#cc0000",  # red
             "#009933",  # green
+            "#ffd700",  # yellow
             "#ff8800",  # orange
             "#9933cc",  # purple
             "#a5722a",  # brown
@@ -493,7 +494,22 @@ class WireBundleApp(QWidget):
         )
         self.add_sleeve_btn.setEnabled(False)
         self.add_sleeve_btn.clicked.connect(self._add_sleeve)
-        sleeve_form.addRow("", self.add_sleeve_btn)
+
+        self.undo_layer_btn = QPushButton("Undo Last Layer")
+        self.undo_layer_btn.setToolTip(
+            "Remove the most recently added layer (wires and sleeve)."
+        )
+        self.undo_layer_btn.setEnabled(False)
+        self.undo_layer_btn.clicked.connect(self._undo_last_layer)
+
+        sleeve_buttons_layout = QHBoxLayout()
+        sleeve_buttons_layout.setSpacing(10)
+        sleeve_buttons_layout.addWidget(self.add_sleeve_btn)
+        sleeve_buttons_layout.addWidget(self.undo_layer_btn)
+
+        sleeve_buttons_container = QWidget()
+        sleeve_buttons_container.setLayout(sleeve_buttons_layout)
+        sleeve_form.addRow("", sleeve_buttons_container)
 
         sleeve_group.setLayout(sleeve_form)
         layout.addWidget(sleeve_group)
@@ -520,6 +536,9 @@ class WireBundleApp(QWidget):
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
         layout.addWidget(self.plot_widget)
+
+        self.undo_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
+        self.undo_shortcut.activated.connect(self._undo_last_layer)
 
         # Mount content into the scroll area and finish
         scroll.setWidget(content)
@@ -645,10 +664,15 @@ class WireBundleApp(QWidget):
         # Allow adding sleeves: either fresh solution or existing layers allow it
         if hasattr(self, "add_sleeve_btn"):
             self._update_add_sleeve_button()
+            self._update_undo_button()
 
     def _update_add_sleeve_button(self) -> None:
         can_add = (self._last_R is not None) or (self.frozen_core_radius > 0.0)
         self.add_sleeve_btn.setEnabled(bool(can_add))
+
+    def _update_undo_button(self) -> None:
+        if hasattr(self, "undo_layer_btn"):
+            self.undo_layer_btn.setEnabled(bool(self.layers))
 
     def _add_sleeve(self) -> None:
         """
@@ -691,6 +715,7 @@ class WireBundleApp(QWidget):
                     "outer_R": outer_R,
                     "ring_color": ring_color,
                     "sleeve_label": sleeve_label,
+                    "wire_defs": [tuple(entry) for entry in self.wire_defs],
                 }
             )
 
@@ -716,6 +741,7 @@ class WireBundleApp(QWidget):
                     "outer_R": outer_R,
                     "ring_color": ring_color,
                     "sleeve_label": sleeve_label,
+                    "wire_defs": [tuple(entry) for entry in self.wire_defs],
                 }
             )
             self.frozen_core_radius = outer_R
@@ -732,6 +758,52 @@ class WireBundleApp(QWidget):
         self.plot_widget.update_scene(np.empty((0, 2)), np.array([]), 0.0, [])
         self._update_diameter_label_current()
         self._update_add_sleeve_button()
+        self._update_undo_button()
+
+    def _undo_last_layer(self) -> None:
+        """Remove the most recently added layer and restore prior state."""
+        if not self.layers:
+            return
+
+        removed_layer = self.layers.pop()
+        self.frozen_core_radius = (
+            float(self.layers[-1]["outer_R"]) if self.layers else 0.0
+        )
+
+        # Restore historical layers in the plot first
+        self.plot_widget.set_layers(self.layers, self.frozen_core_radius)
+
+        coords = removed_layer.get("coords")
+        radii = removed_layer.get("radii")
+        colors = removed_layer.get("colors")
+
+        if coords is not None and len(coords):
+            self._last_coords = np.array(coords, dtype=float)
+            self._last_radii = np.array(radii, dtype=float)
+            self._last_R = float(removed_layer.get("inner_R", 0.0))
+            self._last_colors = list(colors) if colors is not None else []
+
+            self.plot_widget.update_scene(
+                self._last_coords,
+                self._last_radii,
+                self._last_R,
+                self._last_colors,
+            )
+
+            saved_defs = removed_layer.get("wire_defs") or []
+            if saved_defs and not self.wire_defs:
+                self.wire_defs = [tuple(entry) for entry in saved_defs]
+                self._refresh_list()
+        else:
+            self._last_coords = None
+            self._last_radii = None
+            self._last_R = None
+            self._last_colors = None
+            self.plot_widget.update_scene(np.empty((0, 2)), np.array([]), 0.0, [])
+
+        self._update_diameter_label_current()
+        self._update_add_sleeve_button()
+        self._update_undo_button()
 
     def _clear_all(self) -> None:
         """
@@ -749,6 +821,7 @@ class WireBundleApp(QWidget):
         self._last_R = None
         self._last_colors = None
         self._update_add_sleeve_button()
+        self._update_undo_button()
 
         # Refresh plot to empty
         self.plot_widget.set_layers(self.layers, self.frozen_core_radius)
